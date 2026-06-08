@@ -9,7 +9,7 @@ import {
   themeQuartz,
   type ColDef,
   type CellValueChangedEvent,
-  type RowClickedEvent,
+  type CellKeyDownEvent,
 } from "ag-grid-community";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -256,7 +256,7 @@ const btnDanger = "inline-flex items-center justify-center gap-1.5 rounded-gmv-m
 
 /* ── Dialog: Thêm doanh thu ── */
 function AddPaymentDialog({ open, onClose, onSuccess, salesList, channelsList, packagesList }: {
-  open: boolean; onClose: () => void; onSuccess: () => void;
+  open: boolean; onClose: () => void; onSuccess: (newPaymentId?: string) => void;
   salesList: any[]; channelsList: any[]; packagesList: any[];
 }) {
   const [form, setForm] = useState({
@@ -269,6 +269,23 @@ function AddPaymentDialog({ open, onClose, onSuccess, salesList, channelsList, p
   const [error, setError] = useState("");
   const [customerResults, setCustomerResults] = useState<any[]>([]);
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
+  const uidInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-focus UID field when dialog opens
+  useEffect(() => {
+    if (open) {
+      // Reset form when re-opened
+      setForm({
+        uid: "", customer_name: "", customer_phone: "",
+        pay_time: new Date().toISOString().slice(0, 16),
+        package_id: "", sale_id: "", channel_id: "",
+        real_pay_vnd: "", gmv_rmb: "", payment_seq: "1", note: "",
+      });
+      setError("");
+      setCustomerResults([]);
+      setTimeout(() => uidInputRef.current?.focus(), 50);
+    }
+  }, [open]);
 
   // Customer search
   useEffect(() => {
@@ -294,7 +311,7 @@ function AddPaymentDialog({ open, onClose, onSuccess, salesList, channelsList, p
     }
     setSaving(true);
     try {
-      await api.post("/api/v1/payments", {
+      const res = await api.post("/api/v1/payments", {
         uid: form.uid,
         pay_time: form.pay_time,
         package_id: form.package_id,
@@ -307,7 +324,7 @@ function AddPaymentDialog({ open, onClose, onSuccess, salesList, channelsList, p
         customer_name: form.customer_name || undefined,
         customer_phone: form.customer_phone || undefined,
       });
-      onSuccess();
+      onSuccess(res.data?.payment_id);
       onClose();
     } catch (err: any) {
       const msg = err?.response?.data?.detail || err?.message || "Lỗi khi thêm doanh thu";
@@ -330,7 +347,7 @@ function AddPaymentDialog({ open, onClose, onSuccess, salesList, channelsList, p
         {/* Customer UID with autocomplete */}
         <FormField label="Khách hàng (UID)" required>
           <div className="relative">
-            <input value={form.uid} onChange={(e) => set("uid", e.target.value)}
+            <input ref={uidInputRef} value={form.uid} onChange={(e) => set("uid", e.target.value)}
               onFocus={() => customerResults.length > 0 && setShowCustomerDropdown(true)}
               onBlur={() => setTimeout(() => setShowCustomerDropdown(false), 200)}
               placeholder="Nhập uid, tên hoặc SĐT..." className={inputCls} />
@@ -718,6 +735,10 @@ function GridSubTab({ canWrite }: { canWrite: boolean }) {
   const [showImport, setShowImport] = useState(false);
   const [detailPayment, setDetailPayment] = useState<Payment | null>(null);
 
+  // Inline delete confirmation: maps payment_id → "pending" (awaiting confirm)
+  const [deletePending, setDeletePending] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+
   // Load master data once
   useEffect(() => {
     Promise.all([
@@ -746,8 +767,10 @@ function GridSubTab({ canWrite }: { canWrite: boolean }) {
 
   useEffect(() => { fetchData(); }, [fetchData]);
   useEffect(() => { setPage(1); }, [teamFilter, search]);
+  // Reset pending delete when data reloads (page/filter change)
+  useEffect(() => { setDeletePending(null); }, [items]);
 
-  // Build sale name→id map for dropdown editor
+  // Build name→id lookup maps for dropdown editors
   const saleNames = useMemo(() => salesList.map((s: any) => s.short_code || s.full_name), [salesList]);
   const saleNameToId = useMemo(() => {
     const m: Record<string, string> = {};
@@ -755,10 +778,64 @@ function GridSubTab({ canWrite }: { canWrite: boolean }) {
     return m;
   }, [salesList]);
 
+  const channelNames = useMemo(() => channelsList.map((c: any) => c.name), [channelsList]);
+  const channelNameToId = useMemo(() => {
+    const m: Record<string, string> = {};
+    channelsList.forEach((c: any) => { m[c.name] = c.id; });
+    return m;
+  }, [channelsList]);
+
+  const packageNames = useMemo(() => packagesList.map((p: any) => p.name), [packagesList]);
+  const packageNameToId = useMemo(() => {
+    const m: Record<string, string> = {};
+    packagesList.forEach((p: any) => { m[p.name] = p.id; });
+    return m;
+  }, [packagesList]);
+
+  // Inline delete: confirm → delete → remove row
+  const handleInlineDelete = useCallback(async (paymentId: string) => {
+    setDeleting(paymentId);
+    try {
+      await api.delete(`/api/v1/payments/${paymentId}`);
+      gridRef.current?.api?.applyTransaction({ remove: [{ payment_id: paymentId }] });
+      toast.show("Đã xóa", "ok");
+    } catch (err: any) {
+      toast.show(err?.response?.data?.detail || "Lỗi khi xóa", "danger");
+    } finally {
+      setDeleting(null);
+      setDeletePending(null);
+    }
+  }, [toast]);
+
   // Column definitions
   const columnDefs = useMemo((): ColDef[] => [
+    // Detail icon column — pinned left, opens DetailDialog on click
+    {
+      colId: "__detail",
+      headerName: "",
+      width: 40,
+      minWidth: 40,
+      maxWidth: 40,
+      pinned: "left" as const,
+      editable: false,
+      sortable: false,
+      resizable: false,
+      suppressMovable: true,
+      cellRenderer: (p: any) => (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); setDetailPayment(p.data); }}
+          title="Xem chi tiết"
+          style={{ background: "none", border: "none", cursor: "pointer", padding: "2px 4px", color: "#7260ff", fontSize: "14px", lineHeight: 1 }}
+        >
+          ▸
+        </button>
+      ),
+    },
     { field: "pay_time", headerName: "Ngày", width: 110,
-      valueFormatter: (p) => fmtDate(p.value), editable: false, sortable: true, filter: true },
+      valueFormatter: (p) => fmtDate(p.value),
+      editable: canWrite,
+      sortable: true, filter: true },
     { field: "uid", headerName: "UID", width: 110, editable: false },
     { headerName: "Khách", width: 130,
       valueGetter: (p) => p.data?.customers?.full_name ?? "—", editable: false },
@@ -769,12 +846,29 @@ function GridSubTab({ canWrite }: { canWrite: boolean }) {
       cellEditorParams: { values: saleNames },
     },
     { field: "team", headerName: "Team", width: 100, editable: false },
-    { headerName: "Kênh", width: 100,
-      valueGetter: (p) => p.data?.channels?.name ?? "—", editable: false },
-    { headerName: "Gói", width: 130,
-      valueGetter: (p) => p.data?.packages?.name ?? "—", editable: false },
+    { headerName: "Kênh", width: 110,
+      valueGetter: (p) => p.data?.channels?.name ?? "—",
+      editable: canWrite,
+      cellEditor: "agSelectCellEditor",
+      cellEditorParams: { values: channelNames },
+    },
+    { headerName: "Gói", width: 140,
+      valueGetter: (p) => p.data?.packages?.name ?? "—",
+      editable: canWrite,
+      cellEditor: "agSelectCellEditor",
+      cellEditorParams: { values: packageNames },
+    },
     { field: "real_pay_vnd", headerName: "VNĐ", width: 120, type: "numericColumn",
       valueFormatter: (p) => fmtVND(p.value ?? 0), editable: canWrite },
+    { field: "gmv_rmb", headerName: "GMV RMB", width: 100, type: "numericColumn",
+      valueFormatter: (p) => p.value != null ? fmtGMV(p.value) : "—",
+      editable: (params) => {
+        if (!canWrite) return false;
+        const payTime = params.data?.pay_time;
+        if (!payTime) return false;
+        return new Date(payTime).getTime() < GMV_CUTOFF;
+      },
+    },
     { field: "gmv_final", headerName: "GMV", width: 100, type: "numericColumn",
       valueFormatter: (p) => fmtGMV(p.value ?? 0), editable: false },
     { field: "payment_seq", headerName: "Lần", width: 65, editable: canWrite },
@@ -788,7 +882,59 @@ function GridSubTab({ canWrite }: { canWrite: boolean }) {
       cellRenderer: (p: any) => <BoolBadge value={p.value} />,
       editable: false },
     { field: "note", headerName: "Note", flex: 1, minWidth: 120, editable: canWrite },
-  ], [canWrite, saleNames]);
+    // Delete column — only rendered when canWrite
+    ...(canWrite ? [{
+      colId: "__delete",
+      headerName: "",
+      width: 44,
+      minWidth: 44,
+      maxWidth: 44,
+      pinned: "right" as const,
+      editable: false,
+      sortable: false,
+      resizable: false,
+      suppressMovable: true,
+      cellRenderer: (p: any) => {
+        const id: string = p.data?.payment_id;
+        const isPending = deletePending === id;
+        const isDeleting = deleting === id;
+        if (isDeleting) {
+          return (
+            <span style={{ fontSize: "12px", color: "#aaa", lineHeight: "44px" }}>...</span>
+          );
+        }
+        if (isPending) {
+          return (
+            <span style={{ display: "flex", gap: "4px", alignItems: "center", height: "100%" }}>
+              <button type="button"
+                onClick={(e) => { e.stopPropagation(); handleInlineDelete(id); }}
+                title="Xác nhận xóa"
+                style={{ background: "none", border: "none", cursor: "pointer", color: "#e03131", fontSize: "14px", lineHeight: 1, padding: "2px" }}>
+                ✓
+              </button>
+              <button type="button"
+                onClick={(e) => { e.stopPropagation(); setDeletePending(null); }}
+                title="Hủy"
+                style={{ background: "none", border: "none", cursor: "pointer", color: "#868e96", fontSize: "14px", lineHeight: 1, padding: "2px" }}>
+                ✕
+              </button>
+            </span>
+          );
+        }
+        return (
+          <button type="button"
+            onClick={(e) => { e.stopPropagation(); setDeletePending(id); }}
+            title="Xóa dòng này"
+            style={{ background: "none", border: "none", cursor: "pointer", color: "#adb5bd", fontSize: "14px", lineHeight: 1, padding: "2px 4px" }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#e03131"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#adb5bd"; }}
+          >
+            🗑
+          </button>
+        );
+      },
+    }] as ColDef[] : []),
+  ], [canWrite, saleNames, channelNames, packageNames, setDetailPayment, deletePending, deleting, handleInlineDelete]);
 
   const defaultColDef = useMemo((): ColDef => ({
     sortable: true,
@@ -800,50 +946,90 @@ function GridSubTab({ canWrite }: { canWrite: boolean }) {
   const handleCellEdit = useCallback(async (event: CellValueChangedEvent) => {
     const { data, colDef, newValue, oldValue } = event;
     const field = colDef.field;
+    const headerName = colDef.headerName ?? "";
     const paymentId = data.payment_id;
 
-    // Special: Sale dropdown → need to map name back to sale_id
-    if (!field && colDef.headerName === "Sale") {
-      const newSaleId = saleNameToId[newValue];
-      if (!newSaleId) {
-        data.sales = { ...data.sales };
-        event.api.applyTransaction({ update: [data] });
-        toast.show("Sale không hợp lệ", "danger");
+    // Helper: apply rollback and show error
+    const rollback = (errMsg: string) => {
+      if (field) {
+        data[field] = oldValue;
+      }
+      event.api.applyTransaction({ update: [data] });
+      toast.show(errMsg, "danger");
+    };
+
+    // Fieldless dropdown columns (use headerName to identify)
+    if (!field) {
+      if (headerName === "Sale") {
+        const newSaleId = saleNameToId[newValue];
+        if (!newSaleId) { rollback("Sale không hợp lệ"); return; }
+        try {
+          const res = await api.patch(`/api/v1/payments/${paymentId}`, { sale_id: newSaleId });
+          event.api.applyTransaction({ update: [res.data] });
+          toast.show("Đã cập nhật Sale", "ok");
+        } catch { rollback("Lỗi cập nhật Sale"); }
         return;
       }
-      try {
-        const res = await api.patch(`/api/v1/payments/${paymentId}`, { sale_id: newSaleId });
-        event.api.applyTransaction({ update: [res.data] });
-        toast.show("Đã cập nhật Sale", "ok");
-      } catch {
-        event.api.applyTransaction({ update: [data] });
-        toast.show("Lỗi cập nhật Sale", "danger");
+      if (headerName === "Kênh") {
+        const newChannelId = channelNameToId[newValue];
+        if (!newChannelId) { rollback("Kênh không hợp lệ"); return; }
+        try {
+          const res = await api.patch(`/api/v1/payments/${paymentId}`, { channel_id: newChannelId });
+          event.api.applyTransaction({ update: [res.data] });
+          toast.show("Đã cập nhật Kênh", "ok");
+        } catch { rollback("Lỗi cập nhật Kênh"); }
+        return;
       }
-      return;
+      if (headerName === "Gói") {
+        const newPackageId = packageNameToId[newValue];
+        if (!newPackageId) { rollback("Gói không hợp lệ"); return; }
+        try {
+          const res = await api.patch(`/api/v1/payments/${paymentId}`, { package_id: newPackageId });
+          event.api.applyTransaction({ update: [res.data] });
+          toast.show("Đã cập nhật Gói", "ok");
+        } catch { rollback("Lỗi cập nhật Gói"); }
+        return;
+      }
+      return; // unknown fieldless column
     }
 
-    if (!field) return;
-
+    // Field-based columns
     try {
-      const patchVal = field === "real_pay_vnd" || field === "payment_seq" ? Number(newValue) : newValue;
-      const res = await api.patch(`/api/v1/payments/${paymentId}`, { [field]: patchVal });
-      // Update row with server response (gmv_final may have changed)
-      event.api.applyTransaction({ update: [res.data] });
-      toast.show(`Đã lưu ${colDef.headerName}`, "ok");
-    } catch {
-      // Rollback
-      data[field] = oldValue;
-      event.api.applyTransaction({ update: [data] });
-      toast.show(`Lỗi cập nhật ${colDef.headerName}`, "danger");
-    }
-  }, [saleNameToId, toast]);
+      let patchBody: Record<string, unknown>;
 
-  // Row click → detail dialog
-  const handleRowClick = useCallback((event: RowClickedEvent) => {
-    // Don't open detail if user was editing
-    if (event.event && (event.event.target as HTMLElement)?.closest(".ag-cell-edit-wrapper")) return;
-    setDetailPayment(event.data);
-  }, []);
+      if (field === "pay_time") {
+        // Parse flexible date input: "2026-05-15", "15/05/2026", "2026-05-15T10:00"
+        const trimmed = String(newValue ?? "").trim();
+        let parsed: Date | null = null;
+        // Try ISO-ish formats first
+        const asDate = new Date(trimmed);
+        if (!isNaN(asDate.getTime())) {
+          parsed = asDate;
+        } else {
+          // Try dd/mm/yyyy
+          const ddmm = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+          if (ddmm) parsed = new Date(`${ddmm[3]}-${ddmm[2].padStart(2, "0")}-${ddmm[1].padStart(2, "0")}`);
+        }
+        if (!parsed || isNaN(parsed.getTime())) { rollback("Ngày không hợp lệ"); return; }
+        patchBody = { pay_time: parsed.toISOString() };
+      } else if (field === "real_pay_vnd" || field === "payment_seq" || field === "gmv_rmb") {
+        const num = Number(newValue);
+        if (isNaN(num)) { rollback(`${headerName} phải là số`); return; }
+        patchBody = { [field]: num };
+      } else {
+        patchBody = { [field]: newValue };
+      }
+
+      const res = await api.patch(`/api/v1/payments/${paymentId}`, patchBody);
+      // Update row with server response (gmv_final may have been recalculated)
+      event.api.applyTransaction({ update: [res.data] });
+      toast.show(`Đã lưu ${headerName}`, "ok");
+    } catch {
+      rollback(`Lỗi cập nhật ${headerName}`);
+    }
+  }, [saleNameToId, channelNameToId, packageNameToId, toast]);
+
+  // Detail dialog is now opened via the ▸ icon column, not row click
 
   // Detail dialog actions
   const handleDetailAction = useCallback(async (action: string, extra?: any) => {
@@ -888,6 +1074,37 @@ function GridSubTab({ canWrite }: { canWrite: boolean }) {
       toast.show("API export chưa sẵn sàng (chờ Đức deploy)", "warn");
     }
   }, [teamFilter, search, toast]);
+
+  // Keyboard Delete: trigger delete flow for the selected row
+  const handleCellKeyDown = useCallback((event: CellKeyDownEvent<Payment>) => {
+    const nativeEvent = event.event as KeyboardEvent | null | undefined;
+    if (!nativeEvent || nativeEvent.key !== "Delete") return;
+    if (!canWrite) return;
+    const paymentId = event.data?.payment_id;
+    if (!paymentId) return;
+    // If already pending confirmation for this row, confirm the delete
+    if (deletePending === paymentId) {
+      handleInlineDelete(paymentId);
+    } else {
+      setDeletePending(paymentId);
+    }
+  }, [canWrite, deletePending, handleInlineDelete]);
+
+  // Post-add: after fetchData resolves, scroll to and flash the new row
+  const handleAddSuccess = useCallback(async (newPaymentId?: string) => {
+    await fetchData();
+    toast.show("Đã thêm doanh thu", "ok");
+    if (!newPaymentId) return;
+    // Small delay to let the grid settle after data update
+    setTimeout(() => {
+      const api = gridRef.current?.api;
+      if (!api) return;
+      const rowNode = api.getRowNode(newPaymentId);
+      if (!rowNode) return;
+      api.ensureNodeVisible(rowNode, "middle");
+      api.flashCells({ rowNodes: [rowNode], flashDuration: 800, fadeDuration: 500 });
+    }, 150);
+  }, [fetchData, toast]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -953,9 +1170,12 @@ function GridSubTab({ canWrite }: { canWrite: boolean }) {
             defaultColDef={defaultColDef}
             getRowId={(params) => params.data.payment_id}
             onCellValueChanged={handleCellEdit}
-            onRowClicked={handleRowClick}
+            onCellKeyDown={handleCellKeyDown}
+            rowSelection={canWrite ? { mode: "singleRow", checkboxes: false, enableClickSelection: true } : undefined}
             stopEditingWhenCellsLoseFocus
-            singleClickEdit={false}
+            singleClickEdit={true}
+            undoRedoCellEditing={true}
+            undoRedoCellEditingLimit={20}
             tooltipShowDelay={300}
             animateRows={false}
           />
@@ -978,7 +1198,7 @@ function GridSubTab({ canWrite }: { canWrite: boolean }) {
 
       {/* Dialogs */}
       <AddPaymentDialog open={showAdd} onClose={() => setShowAdd(false)}
-        onSuccess={() => { fetchData(); toast.show("Đã thêm doanh thu", "ok"); }}
+        onSuccess={handleAddSuccess}
         salesList={salesList} channelsList={channelsList} packagesList={packagesList} />
       <DetailDialog open={!!detailPayment} onClose={() => setDetailPayment(null)}
         payment={detailPayment} onAction={handleDetailAction} />
