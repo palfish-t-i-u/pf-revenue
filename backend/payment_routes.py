@@ -10,7 +10,6 @@ from fastapi import Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from admin_routes import require_module_access, require_module_write
-from analytics_limits import MAX_ANALYTICS_ROWS, fetch_rows_capped
 from payment_logic import compute_gmv_final
 from rbac import require_min_role, resolve_actor
 
@@ -20,9 +19,6 @@ PAYMENT_SELECT = (
     "channels(name, type, channel_code), "
     "packages(name, fixed)"
 )
-
-SUMMARY_SELECT = "payment_id, real_pay_vnd, gmv_final, bank_matched, crm_activated, status"
-
 
 def _parse_pay_time(value: Any) -> datetime:
     if isinstance(value, datetime):
@@ -81,16 +77,6 @@ def _apply_payment_filters(
         q = q.eq("crm_activated", crm_activated == "true")
     return q
 
-
-def _build_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    active_rows = [r for r in rows if r.get("status") == "active"]
-    return {
-        "gmv_final": sum(float(r.get("gmv_final") or 0) for r in active_rows),
-        "real_pay_vnd": sum(float(r.get("real_pay_vnd") or 0) for r in active_rows),
-        "count": len(rows),
-        "unmatched_bank": sum(1 for r in rows if not r.get("bank_matched")),
-        "uncrm": sum(1 for r in active_rows if not r.get("crm_activated")),
-    }
 
 
 def _fetch_payment_row(sb, payment_id: str) -> dict[str, Any]:
@@ -283,33 +269,35 @@ def register_payment_routes(app, sb_getter) -> None:
         items = res.data or []
         total = int(res.count or len(items))
 
-        def fetch_summary_page(off: int, limit: int) -> list[dict[str, Any]]:
-            sq = sb.table("payments").select(SUMMARY_SELECT)
-            sq = _apply_payment_filters(
-                sq,
-                search=search,
-                date_from=date_from,
-                date_to=date_to,
-                team=team,
-                channel_id=channel_id,
-                sale_id=sale_id,
-                status=status,
-                bank_matched=bank_matched,
-                crm_activated=crm_activated,
-                sb=sb,
-            )
-            sq = sq.order("pay_time", desc=True).range(off, off + limit - 1)
-            return sq.execute().data or []
+        rpc_params: dict[str, Any] = {}
+        if search.strip():
+            rpc_params["p_search"] = search.strip()
+            if sb is not None:
+                extra_uids = _search_customer_uids(sb, search.strip())
+                if extra_uids:
+                    rpc_params["p_extra_uids"] = extra_uids
+        if date_from:
+            rpc_params["p_date_from"] = f"{date_from.isoformat()}T00:00:00+00:00"
+        if date_to:
+            rpc_params["p_date_to"] = f"{date_to.isoformat()}T23:59:59+00:00"
+        if team:
+            rpc_params["p_team"] = team.strip()
+        if channel_id:
+            rpc_params["p_channel_id"] = channel_id.strip()
+        if sale_id:
+            rpc_params["p_sale_id"] = sale_id.strip()
+        if status:
+            rpc_params["p_status"] = status.strip()
+        if bank_matched:
+            rpc_params["p_bank_matched"] = bank_matched
+        if crm_activated:
+            rpc_params["p_crm_activated"] = crm_activated
 
-        summary_rows, truncated = fetch_rows_capped(
-            fetch_summary_page,
-            page_size=1000,
-            cap=MAX_ANALYTICS_ROWS,
-            log_prefix="[payments] summary",
-        )
-        summary = _build_summary(summary_rows)
-        if truncated:
-            summary["truncated"] = True
+        summary_res = sb.rpc("payments_summary", rpc_params).execute()
+        summary = summary_res.data or {
+            "count": 0, "gmv_final": 0, "real_pay_vnd": 0,
+            "unmatched_bank": 0, "uncrm": 0,
+        }
 
         return {"items": items, "total": total, "summary": summary}
 

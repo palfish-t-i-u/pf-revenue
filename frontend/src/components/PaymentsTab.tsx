@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { cn } from "../lib/cn";
 import { usePermission } from "../hooks/usePermission";
 import { api } from "../lib/api";
@@ -10,6 +10,7 @@ import {
   type ColDef,
   type CellValueChangedEvent,
   type CellKeyDownEvent,
+  type CellContextMenuEvent,
 } from "ag-grid-community";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -711,6 +712,88 @@ function AddMasterDialog({ open, onClose, masterTab, onSuccess }: {
 }
 
 /* ═══════════════════════════════════════
+   Date picker cell editor
+   ═══════════════════════════════════════ */
+const DatePickerEditor = forwardRef((props: any, ref) => {
+  const raw = props.data?.pay_time;
+  const [value, setValue] = useState(() => {
+    if (!raw) return "";
+    const d = new Date(raw);
+    return isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+  });
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useImperativeHandle(ref, () => ({
+    getValue: () => {
+      if (!value) return props.value;
+      const [y, m, d] = value.split("-");
+      return `${d}/${m}/${y}`;
+    },
+    isCancelAfterEnd: () => false,
+    afterGuiAttached: () => {
+      inputRef.current?.focus();
+      inputRef.current?.showPicker?.();
+    },
+  }));
+
+  return (
+    <input ref={inputRef} type="date" value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onKeyDown={(e) => { if (e.key === "Escape") props.stopEditing(); }}
+      style={{ width: "100%", height: "100%", border: "none", outline: "none", background: "transparent", fontSize: "inherit", fontFamily: "inherit" }} />
+  );
+});
+
+/* ═══════════════════════════════════════
+   Right-click context menu
+   ═══════════════════════════════════════ */
+interface CtxMenuState { x: number; y: number; data: any; selectedCount: number }
+
+function GridContextMenu({ menu, onClose, onDeleteRows, onAddRow }: {
+  menu: CtxMenuState;
+  onClose: () => void;
+  onDeleteRows: () => void;
+  onAddRow: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    window.addEventListener("mousedown", handler);
+    window.addEventListener("contextmenu", handler);
+    return () => {
+      window.removeEventListener("mousedown", handler);
+      window.removeEventListener("contextmenu", handler);
+    };
+  }, [onClose]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  const itemCls = "w-full px-3 py-1.5 text-left text-sm hover:bg-gray-100 transition-colors rounded";
+
+  return (
+    <div ref={ref}
+      className="fixed z-[9999] min-w-[180px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+      style={{ left: menu.x, top: menu.y }}>
+      <button type="button" className={itemCls} onClick={() => { onAddRow(); onClose(); }}>
+        + Thêm doanh thu mới
+      </button>
+      <div className="my-1 border-t border-gray-100" />
+      <button type="button" className={cn(itemCls, "text-red-600 hover:bg-red-50")}
+        onClick={() => { onDeleteRows(); onClose(); }}>
+        {menu.selectedCount > 1 ? `Xóa ${menu.selectedCount} dòng đã chọn` : "Xóa dòng này"}
+      </button>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════
    Sub-tab: Doanh thu (AG Grid)
    ═══════════════════════════════════════ */
 function GridSubTab({ canWrite }: { canWrite: boolean }) {
@@ -735,7 +818,8 @@ function GridSubTab({ canWrite }: { canWrite: boolean }) {
   const [showImport, setShowImport] = useState(false);
   const [detailPayment, setDetailPayment] = useState<Payment | null>(null);
 
-  // Inline delete confirmation: maps payment_id → "pending" (awaiting confirm)
+  // Context menu + inline delete
+  const [contextMenu, setContextMenu] = useState<CtxMenuState | null>(null);
   const [deletePending, setDeletePending] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
 
@@ -809,132 +893,66 @@ function GridSubTab({ canWrite }: { canWrite: boolean }) {
 
   // Column definitions
   const columnDefs = useMemo((): ColDef[] => [
-    // Detail icon column — pinned left, opens DetailDialog on click
-    {
-      colId: "__detail",
-      headerName: "",
-      width: 40,
-      minWidth: 40,
-      maxWidth: 40,
-      pinned: "left" as const,
-      editable: false,
-      sortable: false,
-      resizable: false,
-      suppressMovable: true,
-      cellRenderer: (p: any) => (
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); setDetailPayment(p.data); }}
-          title="Xem chi tiết"
-          style={{ background: "none", border: "none", cursor: "pointer", padding: "2px 4px", color: "#7260ff", fontSize: "14px", lineHeight: 1 }}
-        >
-          ▸
-        </button>
-      ),
-    },
-    { field: "pay_time", headerName: "Ngày", width: 110,
-      valueFormatter: (p) => fmtDate(p.value),
+    { headerName: "Ngày", width: 115, pinned: "left" as const,
+      valueGetter: (p: any) => {
+        const raw = p.data?.pay_time;
+        if (!raw) return "";
+        try { return new Date(raw).toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" }); }
+        catch { return ""; }
+      },
+      comparator: (_a: any, _b: any, nodeA: any, nodeB: any) => {
+        const da = new Date(nodeA.data?.pay_time || 0).getTime();
+        const db = new Date(nodeB.data?.pay_time || 0).getTime();
+        return da - db;
+      },
       editable: canWrite,
+      cellEditor: DatePickerEditor,
       sortable: true, filter: true },
-    { field: "uid", headerName: "UID", width: 110, editable: false },
-    { headerName: "Khách", width: 130,
-      valueGetter: (p) => p.data?.customers?.full_name ?? "—", editable: false },
-    { headerName: "Sale", width: 100,
-      valueGetter: (p) => p.data?.sales?.short_code ?? p.data?.sales?.full_name ?? "—",
+    { field: "uid", headerName: "UID", width: 120, pinned: "left" as const, editable: canWrite },
+    { headerName: "Khách", width: 120, pinned: "left" as const,
+      valueGetter: (p: any) => p.data?.customers?.full_name ?? "", editable: canWrite },
+    { headerName: "Sale", width: 100, pinned: "left" as const,
+      valueGetter: (p: any) => p.data?.sales?.short_code ?? p.data?.sales?.full_name ?? "—",
       editable: canWrite,
       cellEditor: "agSelectCellEditor",
       cellEditorParams: { values: saleNames },
     },
     { field: "team", headerName: "Team", width: 100, editable: false },
     { headerName: "Kênh", width: 110,
-      valueGetter: (p) => p.data?.channels?.name ?? "—",
+      valueGetter: (p: any) => p.data?.channels?.name ?? "—",
       editable: canWrite,
       cellEditor: "agSelectCellEditor",
       cellEditorParams: { values: channelNames },
     },
     { headerName: "Gói", width: 140,
-      valueGetter: (p) => p.data?.packages?.name ?? "—",
+      valueGetter: (p: any) => p.data?.packages?.name ?? "—",
       editable: canWrite,
       cellEditor: "agSelectCellEditor",
       cellEditorParams: { values: packageNames },
     },
-    { field: "real_pay_vnd", headerName: "VNĐ", width: 120, type: "numericColumn",
-      valueFormatter: (p) => fmtVND(p.value ?? 0), editable: canWrite },
-    { field: "gmv_rmb", headerName: "GMV RMB", width: 100, type: "numericColumn",
-      valueFormatter: (p) => p.value != null ? fmtGMV(p.value) : "—",
-      editable: (params) => {
+    { field: "real_pay_vnd", headerName: "VNĐ", width: 130, type: "numericColumn",
+      valueFormatter: (p: any) => fmtVND(p.value ?? 0), editable: canWrite },
+    { field: "gmv_final", headerName: "GMV", width: 110, type: "numericColumn",
+      valueFormatter: (p: any) => fmtGMV(p.value ?? 0),
+      editable: (params: any) => {
         if (!canWrite) return false;
         const payTime = params.data?.pay_time;
         if (!payTime) return false;
         return new Date(payTime).getTime() < GMV_CUTOFF;
       },
     },
-    { field: "gmv_final", headerName: "GMV", width: 100, type: "numericColumn",
-      valueFormatter: (p) => fmtGMV(p.value ?? 0), editable: false },
-    { field: "payment_seq", headerName: "Lần", width: 65, editable: canWrite },
-    { field: "status", headerName: "TT", width: 90,
+    { field: "payment_seq", headerName: "Lần", width: 60, editable: canWrite },
+    { field: "status", headerName: "TT", width: 80,
       cellRenderer: (p: any) => <StatusBadge status={p.value} />,
       editable: false },
-    { field: "bank_matched", headerName: "NH", width: 70,
+    { field: "bank_matched", headerName: "NH", width: 65,
       cellRenderer: (p: any) => <BoolBadge value={p.value} yes="Khớp" no="Chưa" />,
       editable: false },
-    { field: "crm_activated", headerName: "CRM", width: 70,
+    { field: "crm_activated", headerName: "CRM", width: 65,
       cellRenderer: (p: any) => <BoolBadge value={p.value} />,
       editable: false },
-    { field: "note", headerName: "Note", flex: 1, minWidth: 120, editable: canWrite },
-    // Delete column — only rendered when canWrite
-    ...(canWrite ? [{
-      colId: "__delete",
-      headerName: "",
-      width: 44,
-      minWidth: 44,
-      maxWidth: 44,
-      pinned: "right" as const,
-      editable: false,
-      sortable: false,
-      resizable: false,
-      suppressMovable: true,
-      cellRenderer: (p: any) => {
-        const id: string = p.data?.payment_id;
-        const isPending = deletePending === id;
-        const isDeleting = deleting === id;
-        if (isDeleting) {
-          return (
-            <span style={{ fontSize: "12px", color: "#aaa", lineHeight: "44px" }}>...</span>
-          );
-        }
-        if (isPending) {
-          return (
-            <span style={{ display: "flex", gap: "4px", alignItems: "center", height: "100%" }}>
-              <button type="button"
-                onClick={(e) => { e.stopPropagation(); handleInlineDelete(id); }}
-                title="Xác nhận xóa"
-                style={{ background: "none", border: "none", cursor: "pointer", color: "#e03131", fontSize: "14px", lineHeight: 1, padding: "2px" }}>
-                ✓
-              </button>
-              <button type="button"
-                onClick={(e) => { e.stopPropagation(); setDeletePending(null); }}
-                title="Hủy"
-                style={{ background: "none", border: "none", cursor: "pointer", color: "#868e96", fontSize: "14px", lineHeight: 1, padding: "2px" }}>
-                ✕
-              </button>
-            </span>
-          );
-        }
-        return (
-          <button type="button"
-            onClick={(e) => { e.stopPropagation(); setDeletePending(id); }}
-            title="Xóa dòng này"
-            style={{ background: "none", border: "none", cursor: "pointer", color: "#adb5bd", fontSize: "14px", lineHeight: 1, padding: "2px 4px" }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#e03131"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#adb5bd"; }}
-          >
-            🗑
-          </button>
-        );
-      },
-    }] as ColDef[] : []),
-  ], [canWrite, saleNames, channelNames, packageNames, setDetailPayment, deletePending, deleting, handleInlineDelete]);
+    { field: "note", headerName: "Note", width: 150, minWidth: 100, editable: canWrite },
+  ], [canWrite, saleNames, channelNames, packageNames]);
 
   const defaultColDef = useMemo((): ColDef => ({
     sortable: true,
@@ -958,8 +976,36 @@ function GridSubTab({ canWrite }: { canWrite: boolean }) {
       toast.show(errMsg, "danger");
     };
 
-    // Fieldless dropdown columns (use headerName to identify)
+    // Fieldless columns (use headerName to identify)
     if (!field) {
+      if (headerName === "Ngày") {
+        const trimmed = String(newValue ?? "").trim();
+        let parsed: Date | null = null;
+        const ddmm = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        if (ddmm) parsed = new Date(`${ddmm[3]}-${ddmm[2].padStart(2, "0")}-${ddmm[1].padStart(2, "0")}`);
+        if (!parsed || isNaN(parsed.getTime())) {
+          const asDate = new Date(trimmed);
+          if (!isNaN(asDate.getTime())) parsed = asDate;
+        }
+        if (!parsed || isNaN(parsed.getTime())) { rollback("Ngày không hợp lệ (dd/mm/yyyy)"); return; }
+        try {
+          const res = await api.patch(`/api/v1/payments/${paymentId}`, { pay_time: parsed.toISOString() });
+          event.api.applyTransaction({ update: [res.data] });
+          toast.show("Đã cập nhật Ngày", "ok");
+        } catch { rollback("Lỗi cập nhật Ngày"); }
+        return;
+      }
+      if (headerName === "Khách") {
+        const uid = data.uid;
+        if (!uid) { rollback("Không tìm thấy UID"); return; }
+        try {
+          await api.patch(`/api/v1/payments/master/customers/${uid}`, { full_name: String(newValue ?? "").trim() });
+          data.customers = { ...data.customers, full_name: newValue };
+          event.api.applyTransaction({ update: [data] });
+          toast.show("Đã cập nhật tên khách", "ok");
+        } catch { rollback("Lỗi cập nhật tên khách"); }
+        return;
+      }
       if (headerName === "Sale") {
         const newSaleId = saleNameToId[newValue];
         if (!newSaleId) { rollback("Sale không hợp lệ"); return; }
@@ -990,29 +1036,18 @@ function GridSubTab({ canWrite }: { canWrite: boolean }) {
         } catch { rollback("Lỗi cập nhật Gói"); }
         return;
       }
-      return; // unknown fieldless column
+      return;
     }
 
     // Field-based columns
     try {
       let patchBody: Record<string, unknown>;
 
-      if (field === "pay_time") {
-        // Parse flexible date input: "2026-05-15", "15/05/2026", "2026-05-15T10:00"
-        const trimmed = String(newValue ?? "").trim();
-        let parsed: Date | null = null;
-        // Try ISO-ish formats first
-        const asDate = new Date(trimmed);
-        if (!isNaN(asDate.getTime())) {
-          parsed = asDate;
-        } else {
-          // Try dd/mm/yyyy
-          const ddmm = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-          if (ddmm) parsed = new Date(`${ddmm[3]}-${ddmm[2].padStart(2, "0")}-${ddmm[1].padStart(2, "0")}`);
-        }
-        if (!parsed || isNaN(parsed.getTime())) { rollback("Ngày không hợp lệ"); return; }
-        patchBody = { pay_time: parsed.toISOString() };
-      } else if (field === "real_pay_vnd" || field === "payment_seq" || field === "gmv_rmb") {
+      if (field === "gmv_final") {
+        const num = Number(newValue);
+        if (isNaN(num)) { rollback("GMV phải là số"); return; }
+        patchBody = { gmv_rmb: num };
+      } else if (field === "real_pay_vnd" || field === "payment_seq") {
         const num = Number(newValue);
         if (isNaN(num)) { rollback(`${headerName} phải là số`); return; }
         patchBody = { [field]: num };
@@ -1075,20 +1110,69 @@ function GridSubTab({ canWrite }: { canWrite: boolean }) {
     }
   }, [teamFilter, search, toast]);
 
-  // Keyboard Delete: trigger delete flow for the selected row
+  // Bulk delete: delete all selected rows
+  const handleBulkDelete = useCallback(async () => {
+    const gridApi = gridRef.current?.api;
+    if (!gridApi) return;
+    const selected = gridApi.getSelectedRows() as Payment[];
+    if (!selected.length) return;
+    setDeleting("bulk");
+    const results = await Promise.allSettled(
+      selected.map((row) => api.delete(`/api/v1/payments/${row.payment_id}`))
+    );
+    const removed: Payment[] = [];
+    results.forEach((r, i) => {
+      if (r.status === "fulfilled") removed.push(selected[i]);
+    });
+    if (removed.length) gridApi.applyTransaction({ remove: removed });
+    const ok = removed.length;
+    toast.show(ok === selected.length ? `Đã xóa ${ok} dòng` : `Xóa ${ok}/${selected.length} dòng`, ok === selected.length ? "ok" : "warn");
+    setDeleting(null);
+  }, [toast]);
+
+  // Context menu handler
+  const handleContextMenu = useCallback((event: CellContextMenuEvent) => {
+    event.event?.preventDefault();
+    const mouseEvent = event.event as MouseEvent;
+    const selectedCount = gridRef.current?.api?.getSelectedRows().length ?? 0;
+    setContextMenu({
+      x: mouseEvent.clientX,
+      y: mouseEvent.clientY,
+      data: event.data,
+      selectedCount: Math.max(selectedCount, 1),
+    });
+  }, []);
+
+  // Context menu: delete selected rows (or single row)
+  const handleContextDeleteRows = useCallback(() => {
+    const gridApi = gridRef.current?.api;
+    const selected = gridApi?.getSelectedRows() as Payment[] | undefined;
+    if (selected && selected.length > 1) {
+      handleBulkDelete();
+    } else {
+      const row = contextMenu?.data;
+      if (row?.payment_id) handleInlineDelete(row.payment_id);
+    }
+  }, [contextMenu, handleBulkDelete, handleInlineDelete]);
+
+  // Keyboard Delete: trigger delete flow for selected rows
   const handleCellKeyDown = useCallback((event: CellKeyDownEvent<Payment>) => {
     const nativeEvent = event.event as KeyboardEvent | null | undefined;
     if (!nativeEvent || nativeEvent.key !== "Delete") return;
     if (!canWrite) return;
+    const selected = gridRef.current?.api?.getSelectedRows() as Payment[] | undefined;
+    if (selected && selected.length > 1) {
+      handleBulkDelete();
+      return;
+    }
     const paymentId = event.data?.payment_id;
     if (!paymentId) return;
-    // If already pending confirmation for this row, confirm the delete
     if (deletePending === paymentId) {
       handleInlineDelete(paymentId);
     } else {
       setDeletePending(paymentId);
     }
-  }, [canWrite, deletePending, handleInlineDelete]);
+  }, [canWrite, deletePending, handleInlineDelete, handleBulkDelete]);
 
   // Post-add: after fetchData resolves, scroll to and flash the new row
   const handleAddSuccess = useCallback(async (newPaymentId?: string) => {
@@ -1109,11 +1193,11 @@ function GridSubTab({ canWrite }: { canWrite: boolean }) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   return (
-    <div className="space-y-4">
+    <div className="flex h-full flex-col">
       <ToastContainer toasts={toast.toasts} onDismiss={toast.dismiss} />
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="mb-2 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
         <SummaryCard label="Tổng GMV" value={summary.gmv_final != null ? fmtGMV(summary.gmv_final) : "—"} sub="sum gmv_final (active)" />
         <SummaryCard label="Doanh thu VNĐ" value={summary.real_pay_vnd != null ? fmtVND(summary.real_pay_vnd) : "—"} sub="sum real_pay_vnd" />
         <SummaryCard label="Số đơn" value={summary.count != null ? summary.count.toLocaleString("vi-VN") : "—"} sub="active + refunded" />
@@ -1122,7 +1206,7 @@ function GridSubTab({ canWrite }: { canWrite: boolean }) {
       </div>
 
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
         {canWrite && (
           <button type="button" onClick={() => setShowAdd(true)} className={cn(btnPrimary, "gap-1.5")}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -1141,11 +1225,11 @@ function GridSubTab({ canWrite }: { canWrite: boolean }) {
       </div>
 
       {/* Team filter tabs */}
-      <div className="flex gap-1 border-b border-gmv-border">
+      <div className="mb-1 flex gap-1 border-b border-gmv-border">
         {TEAMS.map((tab) => (
           <button key={tab} type="button" onClick={() => setTeamFilter(tab)}
             className={cn(
-              "border-b-2 px-3 py-2 text-sm font-medium transition",
+              "border-b-2 px-3 py-1.5 text-sm font-medium transition",
               teamFilter === tab
                 ? "border-gmv-primary text-gmv-primary"
                 : "border-transparent text-gmv-muted hover:border-gmv-border hover:text-gmv-text"
@@ -1155,13 +1239,13 @@ function GridSubTab({ canWrite }: { canWrite: boolean }) {
         ))}
       </div>
 
-      {/* AG Grid */}
+      {/* AG Grid — flex-1 fills remaining viewport */}
       {loading ? <TableSkeleton cols={10} rows={8} /> : items.length === 0 ? (
         <div className="rounded-gmv-lg border-2 border-dashed border-gmv-border bg-gmv-bg px-6 py-16 text-center text-sm text-gmv-muted">
           Không có dữ liệu {teamFilter !== "Tất cả" ? `cho team "${teamFilter}"` : ""}
         </div>
       ) : (
-        <div style={{ height: "calc(100vh - 380px)", minHeight: "360px", width: "100%" }}>
+        <div className="min-h-0 flex-1" onContextMenu={(e) => { if (canWrite) e.preventDefault(); }}>
           <AgGridReact
             ref={gridRef}
             theme={gridTheme}
@@ -1171,7 +1255,9 @@ function GridSubTab({ canWrite }: { canWrite: boolean }) {
             getRowId={(params) => params.data.payment_id}
             onCellValueChanged={handleCellEdit}
             onCellKeyDown={handleCellKeyDown}
-            rowSelection={canWrite ? { mode: "singleRow", checkboxes: false, enableClickSelection: true } : undefined}
+            onCellContextMenu={canWrite ? handleContextMenu : undefined}
+            rowSelection={canWrite ? { mode: "multiRow", checkboxes: false, headerCheckbox: false, enableClickSelection: true } : undefined}
+            suppressContextMenu
             stopEditingWhenCellsLoseFocus
             singleClickEdit={true}
             undoRedoCellEditing={true}
@@ -1184,16 +1270,26 @@ function GridSubTab({ canWrite }: { canWrite: boolean }) {
 
       {/* Pagination */}
       {total > pageSize && (
-        <div className="flex items-center justify-between text-sm text-gmv-muted">
+        <div className="flex shrink-0 items-center justify-between py-1 text-sm text-gmv-muted">
           <span>Hiện {items.length} / {total.toLocaleString("vi-VN")} dòng</span>
           <div className="flex gap-1">
             <button type="button" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}
-              className="rounded-gmv-md border border-gmv-border bg-gmv-canvas px-3 py-1.5 text-xs font-medium disabled:opacity-40">Trước</button>
-            <span className="px-2 py-1.5 text-xs">Trang {page}/{totalPages}</span>
+              className="rounded-gmv-md border border-gmv-border bg-gmv-canvas px-3 py-1 text-xs font-medium disabled:opacity-40">Trước</button>
+            <span className="px-2 py-1 text-xs">Trang {page}/{totalPages}</span>
             <button type="button" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}
-              className="rounded-gmv-md border border-gmv-border bg-gmv-canvas px-3 py-1.5 text-xs font-medium disabled:opacity-40">Sau</button>
+              className="rounded-gmv-md border border-gmv-border bg-gmv-canvas px-3 py-1 text-xs font-medium disabled:opacity-40">Sau</button>
           </div>
         </div>
+      )}
+
+      {/* Context menu */}
+      {contextMenu && canWrite && (
+        <GridContextMenu
+          menu={contextMenu}
+          onClose={() => setContextMenu(null)}
+          onDeleteRows={handleContextDeleteRows}
+          onAddRow={() => setShowAdd(true)}
+        />
       )}
 
       {/* Dialogs */}
@@ -1653,8 +1749,8 @@ export default function PaymentsTab() {
   const canWrite = !readOnly;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-1.5 rounded-gmv-lg bg-gmv-bg p-1.5">
+    <div className="flex flex-col overflow-hidden" style={{ height: "calc(100vh - 112px)" }}>
+      <div className="mb-2 flex shrink-0 items-center gap-1.5 rounded-gmv-lg bg-gmv-bg p-1.5">
         {SUB_TABS.map((tab) => (
           <button key={tab.id} type="button" onClick={() => setActiveSubTab(tab.id)}
             className={cn("rounded-gmv-md px-4 py-2 text-sm font-semibold transition",
@@ -1665,10 +1761,12 @@ export default function PaymentsTab() {
         ))}
       </div>
 
-      {activeSubTab === "grid" && <GridSubTab canWrite={canWrite} />}
-      {activeSubTab === "reports" && <ReportsSubTab />}
-      {activeSubTab === "recon" && <ReconSubTab />}
-      {activeSubTab === "master" && <MasterSubTab canWrite={canWrite} />}
+      <div className="min-h-0 flex-1">
+        {activeSubTab === "grid" && <GridSubTab canWrite={canWrite} />}
+        {activeSubTab === "reports" && <ReportsSubTab />}
+        {activeSubTab === "recon" && <ReconSubTab />}
+        {activeSubTab === "master" && <MasterSubTab canWrite={canWrite} />}
+      </div>
     </div>
   );
 }
