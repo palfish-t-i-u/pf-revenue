@@ -20,8 +20,6 @@ router = APIRouter(tags=["profile-admin"])
 
 
 class MePatchBody(BaseModel):
-    displayName: str | None = None
-    phone: str | None = None
     crmName: str | None = None
 
 
@@ -30,11 +28,7 @@ class SalePatchBody(BaseModel):
     role: str | None = None
     team: str | None = None
     khoi: str | None = None
-    managerEmail: str | None = None
-    leaderEmail: str | None = None
     active: bool | None = None
-    displayName: str | None = None
-    phone: str | None = None
 
 
 class AuthUserPatchBody(BaseModel):
@@ -269,25 +263,15 @@ def _sb_or_503(get_sb):
     return sb
 
 
-# ─── Column mapping: nhan_su_sale → sales ───
-# crm_name   → full_name
-# is_active  → active
-# sub_team   → khoi
-# sdt        → sdt  (giữ nguyên)
-# display_name → display_name (giữ nguyên)
-
 def _sale_row_to_api(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": row.get("id"),
         "fullName": row.get("full_name"),
+        "shortCode": row.get("short_code"),
         "email": row.get("email"),
-        "phone": row.get("sdt"),
-        "displayName": row.get("display_name"),
         "team": row.get("team"),
         "khoi": row.get("khoi"),
         "role": row.get("role"),
-        "managerEmail": row.get("manager_email"),
-        "leaderEmail": row.get("leader_email"),
         "active": row.get("active", True),
     }
 
@@ -383,14 +367,8 @@ def register_admin_routes(app, get_supabase):
     def patch_me(body: MePatchBody, authorization: str | None = Header(None)):
         sb = _sb_or_503(get_supabase)
         actor = resolve_actor(sb, authorization, allow_unactivated=True)
-        patch: dict[str, Any] = {}
-        if body.phone is not None:
-            patch["sdt"] = body.phone.strip()
-        if body.displayName is not None:
-            patch["display_name"] = body.displayName.strip()
 
         if body.crmName and not actor.staff:
-            # Onboard: link email to staff record by name
             res = (
                 sb.table("sales")
                 .select("*")
@@ -402,20 +380,14 @@ def register_admin_routes(app, get_supabase):
                 raise HTTPException(404, "Không tìm thấy tên nhân sự trong danh sách")
             row = res.data[0]
             sb.table("sales").update(
-                {"email": actor.email, "sdt": body.phone or row.get("sdt"), **patch}
+                {"email": actor.email}
             ).eq("id", row["id"]).execute()
             actor.staff = {**row, "email": actor.email}
-        elif actor.staff:
-            if patch:
-                sb.table("sales").update(patch).eq("id", actor.staff["id"]).execute()
-        else:
-            if body.crmName:
-                raise HTTPException(
-                    400,
-                    "Chưa liên kết nhân sự — gửi crmName để ghép lần đầu",
-                )
-            if patch:
-                raise HTTPException(400, "Chưa có hồ sơ nhân sự — cần ghép trước")
+        elif not actor.staff and body.crmName:
+            raise HTTPException(
+                400,
+                "Chưa liên kết nhân sự — gửi crmName để ghép lần đầu",
+            )
 
         actor = resolve_actor(sb, authorization, allow_unactivated=True)
         return staff_to_profile(actor)
@@ -470,16 +442,8 @@ def register_admin_routes(app, get_supabase):
             patch["team"] = body.team.strip() or None
         if body.khoi is not None:
             patch["khoi"] = body.khoi.strip() or None
-        if body.managerEmail is not None:
-            patch["manager_email"] = body.managerEmail.strip() or None
-        if body.leaderEmail is not None:
-            patch["leader_email"] = body.leaderEmail.strip() or None
         if body.active is not None:
             patch["active"] = body.active
-        if body.displayName is not None:
-            patch["display_name"] = body.displayName.strip() or None
-        if body.phone is not None:
-            patch["sdt"] = body.phone.strip() or None
 
         if not patch:
             raise HTTPException(400, "Không có trường cần cập nhật")
@@ -508,7 +472,7 @@ def register_admin_routes(app, get_supabase):
 
         staff_res = (
             sb.table("sales")
-            .select("full_name, email, role, team, khoi, sdt, display_name")
+            .select("full_name, email, role, team, khoi")
             .execute()
         )
         by_email = {
@@ -545,7 +509,7 @@ def register_admin_routes(app, get_supabase):
                     "team": meta.get("team") or (linked.get("team") if linked else None),
                     "khoi": meta.get("sub_team") or (linked.get("khoi") if linked else None),
                     "fullName": full_name,
-                    "phone": meta.get("phone") or (linked.get("sdt") if linked else None),
+                    "phone": meta.get("phone"),
                 }
             )
         return {"users": out}
