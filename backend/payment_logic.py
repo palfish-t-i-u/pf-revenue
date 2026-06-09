@@ -10,6 +10,13 @@ GMV_EXCHANGE_RATE = Decimal(os.getenv("GMV_EXCHANGE_RATE", "3700"))
 GMV_CUTOFF = datetime(2026, 6, 1, tzinfo=timezone.utc)
 
 
+def get_gmv_rule_meta() -> dict[str, float | str]:
+    return {
+        "exchange_rate": float(GMV_EXCHANGE_RATE),
+        "cutoff_at": GMV_CUTOFF.isoformat(),
+    }
+
+
 def compute_gmv_final(
     pay_time: datetime,
     real_pay_vnd: Decimal,

@@ -42,6 +42,10 @@ interface Payment {
   packages?: { id: string; name: string };
   updated_at?: string;
 }
+interface GmvRuleMeta {
+  exchange_rate: number;
+  cutoff_at: string;
+}
 interface ToastItem { id: number; message: string; tone: "ok" | "danger" | "warn" }
 
 /* ── Constants ── */
@@ -92,8 +96,10 @@ const MASTER_TABS_META: { id: MasterTab; label: string; endpoint: string; column
       { key: "phone", label: "SĐT", editable: true },
     ] },
 ];
-const GMV_RATE = 3700;
-const GMV_CUTOFF = new Date("2026-06-01T00:00:00Z").getTime();
+const DEFAULT_GMV_RULE: GmvRuleMeta = {
+  exchange_rate: 3700,
+  cutoff_at: "2026-06-01T00:00:00+00:00",
+};
 
 /* ── Helpers ── */
 const fmtVND = (n: number) => new Intl.NumberFormat("vi-VN").format(Math.round(n));
@@ -102,10 +108,10 @@ const fmtDate = (s: string) => {
   try { return new Date(s).toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" }); }
   catch { return s?.slice(0, 10) ?? "—"; }
 };
-const computeGmvPreview = (payTime: string, vnd: number, rmb?: number) => {
+const computeGmvPreview = (rule: GmvRuleMeta, payTime: string, vnd: number, rmb?: number) => {
   if (!payTime || !vnd) return 0;
   const t = new Date(payTime).getTime();
-  return t < GMV_CUTOFF && rmb ? rmb : vnd / GMV_RATE;
+  return t < new Date(rule.cutoff_at).getTime() && rmb ? rmb : vnd / rule.exchange_rate;
 };
 let _toastSeq = 0;
 
@@ -256,9 +262,10 @@ const btnSecondary = "inline-flex items-center justify-center gap-1.5 rounded-gm
 const btnDanger = "inline-flex items-center justify-center gap-1.5 rounded-gmv-md bg-red-600 px-4 py-2 text-sm font-medium text-white shadow-gmv-1 transition hover:bg-red-700 disabled:opacity-50";
 
 /* ── Dialog: Thêm doanh thu ── */
-function AddPaymentDialog({ open, onClose, onSuccess, salesList, channelsList, packagesList }: {
+function AddPaymentDialog({ open, onClose, onSuccess, salesList, channelsList, packagesList, gmvRule }: {
   open: boolean; onClose: () => void; onSuccess: (newPaymentId?: string) => void;
   salesList: any[]; channelsList: any[]; packagesList: any[];
+  gmvRule: GmvRuleMeta;
 }) {
   const [form, setForm] = useState({
     uid: "", customer_name: "", customer_phone: "",
@@ -301,8 +308,9 @@ function AddPaymentDialog({ open, onClose, onSuccess, salesList, channelsList, p
     return () => clearTimeout(t);
   }, [form.uid]);
 
-  const gmvPreview = computeGmvPreview(form.pay_time, Number(form.real_pay_vnd) || 0, Number(form.gmv_rmb) || undefined);
-  const showGmvRmb = form.pay_time && new Date(form.pay_time).getTime() < GMV_CUTOFF;
+  const gmvCutoff = new Date(gmvRule.cutoff_at).getTime();
+  const gmvPreview = computeGmvPreview(gmvRule, form.pay_time, Number(form.real_pay_vnd) || 0, Number(form.gmv_rmb) || undefined);
+  const showGmvRmb = form.pay_time && new Date(form.pay_time).getTime() < gmvCutoff;
 
   const handleSubmit = async () => {
     setError("");
@@ -434,7 +442,7 @@ function AddPaymentDialog({ open, onClose, onSuccess, salesList, channelsList, p
           <span className="text-gmv-muted">GMV Final (tự tính): </span>
           <span className="font-semibold text-gmv-text-strong">{fmtGMV(gmvPreview)}</span>
           <span className="ml-2 text-xs text-gmv-muted">
-            {showGmvRmb ? "= gmv_rmb (trước 01/06/2026)" : `= ${fmtVND(Number(form.real_pay_vnd) || 0)} / ${GMV_RATE}`}
+            {showGmvRmb ? "= gmv_rmb (trước mốc cutoff)" : `= ${fmtVND(Number(form.real_pay_vnd) || 0)} / ${gmvRule.exchange_rate}`}
           </span>
         </div>
 
@@ -796,9 +804,10 @@ function GridContextMenu({ menu, onClose, onDeleteRows, onAddRow }: {
 /* ═══════════════════════════════════════
    Sub-tab: Doanh thu (AG Grid)
    ═══════════════════════════════════════ */
-function GridSubTab({ canWrite }: { canWrite: boolean }) {
+function GridSubTab({ canWrite, gmvRule }: { canWrite: boolean; gmvRule: GmvRuleMeta }) {
   const toast = useToast();
   const gridRef = useRef<AgGridReact>(null);
+  const gmvCutoff = useMemo(() => new Date(gmvRule.cutoff_at).getTime(), [gmvRule]);
   const [teamFilter, setTeamFilter] = useState("Tất cả");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -938,7 +947,7 @@ function GridSubTab({ canWrite }: { canWrite: boolean }) {
         if (!canWrite) return false;
         const payTime = params.data?.pay_time;
         if (!payTime) return false;
-        return new Date(payTime).getTime() < GMV_CUTOFF;
+        return new Date(payTime).getTime() < gmvCutoff;
       },
     },
     { field: "payment_seq", headerName: "Lần", width: 60, editable: canWrite },
@@ -952,7 +961,7 @@ function GridSubTab({ canWrite }: { canWrite: boolean }) {
       cellRenderer: (p: any) => <BoolBadge value={p.value} />,
       editable: false },
     { field: "note", headerName: "Note", width: 150, minWidth: 100, editable: canWrite },
-  ], [canWrite, saleNames, channelNames, packageNames]);
+  ], [canWrite, saleNames, channelNames, packageNames, gmvCutoff]);
 
   const defaultColDef = useMemo((): ColDef => ({
     sortable: true,
@@ -1295,7 +1304,7 @@ function GridSubTab({ canWrite }: { canWrite: boolean }) {
       {/* Dialogs */}
       <AddPaymentDialog open={showAdd} onClose={() => setShowAdd(false)}
         onSuccess={handleAddSuccess}
-        salesList={salesList} channelsList={channelsList} packagesList={packagesList} />
+        salesList={salesList} channelsList={channelsList} packagesList={packagesList} gmvRule={gmvRule} />
       <DetailDialog open={!!detailPayment} onClose={() => setDetailPayment(null)}
         payment={detailPayment} onAction={handleDetailAction} />
       <ImportDialog open={showImport} onClose={() => setShowImport(false)}
@@ -1745,8 +1754,26 @@ function MasterSubTab({ canWrite }: { canWrite: boolean }) {
    ═══════════════════════════════════════ */
 export default function PaymentsTab() {
   const [activeSubTab, setActiveSubTab] = useState<SubTab>("grid");
+  const [gmvRule, setGmvRule] = useState<GmvRuleMeta>(DEFAULT_GMV_RULE);
   const { readOnly } = usePermission("payments");
   const canWrite = !readOnly;
+
+  useEffect(() => {
+    let alive = true;
+    api.get("/api/v1/payments/meta")
+      .then((res) => {
+        const rule = res.data?.gmv_rule;
+        if (!alive || !rule?.exchange_rate || !rule?.cutoff_at) return;
+        setGmvRule({
+          exchange_rate: Number(rule.exchange_rate),
+          cutoff_at: String(rule.cutoff_at),
+        });
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   return (
     <div className="flex flex-col overflow-hidden" style={{ height: "calc(100vh - 112px)" }}>
@@ -1762,7 +1789,7 @@ export default function PaymentsTab() {
       </div>
 
       <div className="min-h-0 flex-1">
-        {activeSubTab === "grid" && <GridSubTab canWrite={canWrite} />}
+        {activeSubTab === "grid" && <GridSubTab canWrite={canWrite} gmvRule={gmvRule} />}
         {activeSubTab === "reports" && <ReportsSubTab />}
         {activeSubTab === "recon" && <ReconSubTab />}
         {activeSubTab === "master" && <MasterSubTab canWrite={canWrite} />}

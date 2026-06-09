@@ -64,7 +64,8 @@ App quản lý doanh thu (payments) tách riêng từ PalFish GMV Reconciliation
   - Right-click context menu: Thêm doanh thu / Xóa dòng
   - Multi-row selection: Ctrl+Click chọn nhiều dòng, Delete xóa hàng loạt
   - Auto-save: edit xong blur là lưu ngay qua API
-  - GMV logic: trước 01/06/2026 dùng gmv_rmb, sau đó tính = vnd / 3700
+  - GMV logic: trước 01/06/2026 dùng `gmv_rmb`; sau đó tính = `real_pay_vnd / GMV_EXCHANGE_RATE`
+  - FE lấy GMV rule từ BE qua endpoint meta, không còn hard-code riêng trong UI
 - **Pagination**: 50 dòng/trang, server-side
 
 **Sub-tab: Báo cáo**
@@ -74,7 +75,7 @@ App quản lý doanh thu (payments) tách riêng từ PalFish GMV Reconciliation
 - Theo Kênh: Aggregate per channel
 - Date range picker + Export Excel
 
-**Sub-tab: Đối soát** — (placeholder, chưa implement)
+**Sub-tab: Đối soát** — hiện mới có cảnh báo nội bộ; bank upload/manual match/CRM aging vẫn chưa implement
 
 **Sub-tab: Danh mục** — CRUD cho master data
 
@@ -184,9 +185,9 @@ backend/
 ├── main.py                     # FastAPI app, CORS, Supabase client
 ├── rbac.py                     # Actor resolution, role hierarchy, scope enforcement
 ├── admin_routes.py             # /me, /admin/* (auth users, permissions, sales)
-├── payment_routes.py           # /api/v1/payments/* (CRUD, patch, refund, import)
+├── payment_routes.py           # /api/v1/payments/* (CRUD, patch, refund, import, export, meta)
 ├── payment_report_routes.py    # /api/v1/reports/* (BCTB, team, channel)
-├── payment_logic.py            # GMV calculation, business rules
+├── payment_logic.py            # GMV calculation, GMV rule meta
 ├── analytics_limits.py         # Query limits, row-capped fetching
 ├── sheet_row_parsers.py        # GSheet import row parsing
 ├── migrate_gsheet.py           # One-time GSheet → Supabase migration
@@ -201,6 +202,7 @@ backend/
 | GET | `/me` | Current user profile + permissions |
 | PATCH | `/me` | Update profile |
 | GET | `/api/v1/payments` | List payments (paginated, filtered) |
+| GET | `/api/v1/payments/meta` | GMV rule meta cho frontend |
 | POST | `/api/v1/payments` | Create payment |
 | PATCH | `/api/v1/payments/:id` | Update payment fields |
 | DELETE | `/api/v1/payments/:id` | Soft delete payment |
@@ -218,6 +220,7 @@ backend/
 | GET | `/api/v1/reports/bctb` | BCTB pivot report |
 | GET | `/api/v1/reports/team` | Team aggregate report |
 | GET | `/api/v1/reports/channel` | Channel aggregate report |
+| GET | `/api/v1/reports/:type/export` | Export report ra Excel |
 | GET | `/admin/auth-users` | List auth users |
 | POST | `/admin/auth-users` | Create auth user |
 | PATCH | `/admin/auth-users/:id` | Update auth user |
@@ -287,6 +290,11 @@ updated_at    timestamptz
 
 - `payments_summary(...)` — Server-side aggregate thay vì fetch all rows. Trả về count, gmv_final, real_pay_vnd, unmatched_bank, uncrm. Hỗ trợ filter theo search, date range, team, channel, sale, status.
 
+**Lưu ý trạng thái DB hiện tại:**
+
+- `get_payment_warnings(...)` đang được gọi từ app cho cảnh báo nội bộ, nhưng SQL/RPC definition chưa được version trong repo.
+- Các bảng recon như `bank_transactions`, `crm_orders` đã có trong docs nhưng flow nghiệp vụ tương ứng vẫn chưa hoàn thiện ở app.
+
 ### 3.4 Deployment
 
 | Component | Platform | URL |
@@ -326,6 +334,10 @@ updated_at    timestamptz
 | 10 | Performance fix: summary RPC | 06/08 | Tạo `payments_summary()` RPC thay vì fetch 15K rows |
 | 11 | AG Grid worksheet UX | 06/08 | Inline edit, dropdowns, freeze columns, fit viewport |
 | 12 | GSheet-like features | 06/08 | Calendar date picker, right-click context menu, multi-row select, simple add row |
+| 13 | Payments import/export API | 06/09 | Hoàn thiện `POST /api/v1/payments/import` và `GET /api/v1/payments/export` |
+| 14 | GMV rule sync FE/BE | 06/09 | Thêm `GET /api/v1/payments/meta`, FE dùng rule từ BE thay vì hard-code |
+| 15 | Reports contract fix | 06/09 | Reports nhận `from/to`, giữ compatibility `date_from/date_to`, BCTB trả `date_keys + data + sorted_data` |
+| 16 | Reports logic fix | 06/09 | Reports chỉ tính `status='active'`, BCTB thêm alias `full_name` để payload ổn định hơn |
 
 ### TODO
 
@@ -333,11 +345,11 @@ updated_at    timestamptz
 |---|---|---|---|
 | T1 | Đối soát ngân hàng (sub-tab) | Cao | Upload bank statement → match với payments |
 | T2 | CRM activation sync | Cao | Link crm_order_id, mark crm_activated |
-| T3 | Import từ file (API) | Trung bình | POST /payments/import — Đức cần deploy endpoint |
-| T4 | Export Excel (API) | Trung bình | GET /payments/export — cần BE endpoint |
-| T5 | Tỷ giá GMV dynamic | Thấp | In-app config thay vì hard-code 3700 |
+| T3 | Hoàn thiện Recon v1 | Cao | Bank upload, unmatched list, manual match, CRM aging list |
+| T4 | Version DB contract cho recon | Cao | SQL/RPC cho `get_payment_warnings`, `bank_transactions`, `crm_orders` chưa nằm trong repo |
+| T5 | Tỷ giá GMV dynamic có UI config | Thấp | Rule đã sync FE/BE, nhưng chưa có màn hình chỉnh config trong app |
 | T6 | Clipboard (copy/paste cells) | Thấp | Custom implementation (AG Grid Community không có) |
-| T7 | Undo/redo history | Thấp | AG Grid có undoRedoCellEditing, cần test kỹ |
+| T7 | Kiểm thử undo/redo | Thấp | AG Grid đã bật `undoRedoCellEditing`, cần test kỹ với flow thật |
 | T8 | Mobile responsive grid | Thấp | Hiện chỉ ổn trên desktop |
 
 ### Known Issues
@@ -346,6 +358,8 @@ updated_at    timestamptz
 - Backend hay die trên localhost (cần restart manual)
 - AG Grid `suppressContextMenu` có thể là Enterprise-only — đã có fallback `onContextMenu` trên wrapper div
 - 401 errors nếu thiếu Supabase env vars trong `.env.local`
+- Chưa có E2E framework chính thức trong repo; hiện mới phù hợp browser smoke-check song song khi dev
+- `Recon` vẫn phụ thuộc DB contract ngoài repo, nên chưa nên triển khai sâu trước khi chốt rule với Đức
 
 ---
 
@@ -385,4 +399,10 @@ CORS_ORIGINS=http://localhost:5174
 
 ```bash
 cd frontend && npx tsc --noEmit
+```
+
+### Backend tests đã có cho đợt này
+
+```bash
+python -m pytest backend/tests/test_payment_route_helpers.py backend/tests/test_payment_report_routes_logic.py -q
 ```

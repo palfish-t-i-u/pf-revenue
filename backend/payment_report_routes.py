@@ -49,6 +49,38 @@ def register_payment_report_routes(app, sb_getter):
 
         return sb, delta_days
 
+    def _resolve_report_dates(
+        from_date: date | None,
+        to_date: date | None,
+        legacy_date_from: date | None,
+        legacy_date_to: date | None,
+    ) -> tuple[date, date]:
+        """Prefer normalized from/to params while keeping legacy date_from/date_to compatibility."""
+        date_from = from_date or legacy_date_from
+        date_to = to_date or legacy_date_to
+
+        missing_fields = []
+        if date_from is None:
+            missing_fields.append("from")
+        if date_to is None:
+            missing_fields.append("to")
+
+        if missing_fields:
+            raise HTTPException(
+                status_code=422,
+                detail=[
+                    {
+                        "type": "missing",
+                        "loc": ["query", field],
+                        "msg": "Field required",
+                        "input": None,
+                    }
+                    for field in missing_fields
+                ],
+            )
+
+        return date_from, date_to
+
     # ══════════════════════════════════════════════════════════════
     #  REUSABLE DATA-FETCHING HELPERS
     # ══════════════════════════════════════════════════════════════
@@ -63,8 +95,9 @@ def register_payment_report_routes(app, sb_getter):
 
         payments_res = (
             sb.table("payments")
-            .select("pay_time, sale_id, real_pay_vnd, gmv_rmb, gmv_final")
+            .select("pay_time, sale_id, real_pay_vnd, gmv_rmb, gmv_final, status")
             .is_("deleted_at", "null")
+            .eq("status", "active")
             .gte("pay_time", start_str)
             .lte("pay_time", end_str)
             .execute()
@@ -107,6 +140,7 @@ def register_payment_report_routes(app, sb_getter):
             report_data[sid] = {
                 "sale_id": sid,
                 "crm_name": sale.get("full_name"),
+                "full_name": sale.get("full_name"),
                 "department": sale.get("khoi"),
                 "team": sale.get("team"),
                 "sub_team": None,
@@ -165,8 +199,9 @@ def register_payment_report_routes(app, sb_getter):
 
         payments_res = (
             sb.table("payments")
-            .select("sale_id, gmv_final, real_pay_vnd, gmv_rmb")
+            .select("sale_id, gmv_final, real_pay_vnd, gmv_rmb, status")
             .is_("deleted_at", "null")
+            .eq("status", "active")
             .gte("pay_time", start_str)
             .lte("pay_time", end_str)
             .execute()
@@ -241,8 +276,9 @@ def register_payment_report_routes(app, sb_getter):
 
         payments_res = (
             sb.table("payments")
-            .select("channel_id, gmv_final, real_pay_vnd, gmv_rmb")
+            .select("channel_id, gmv_final, real_pay_vnd, gmv_rmb, status")
             .is_("deleted_at", "null")
+            .eq("status", "active")
             .gte("pay_time", start_str)
             .lte("pay_time", end_str)
             .execute()
@@ -334,11 +370,16 @@ def register_payment_report_routes(app, sb_getter):
 
     @router.get("/reports/bctb")
     def get_bctb_report(
-        date_from: date,
-        date_to: date,
+        from_date: date | None = Query(None, alias="from"),
+        to_date: date | None = Query(None, alias="to"),
+        date_from: date | None = Query(None, include_in_schema=False),
+        date_to: date | None = Query(None, include_in_schema=False),
         authorization: str | None = Header(None),
     ):
         """Báo cáo tổng hợp doanh số theo ngày (Zero-fill, Guard Clause, Defensive)."""
+        date_from, date_to = _resolve_report_dates(
+            from_date, to_date, date_from, date_to
+        )
         sb, _ = _guard_and_rbac(date_from, date_to, authorization)
 
         try:
@@ -347,6 +388,7 @@ def register_payment_report_routes(app, sb_getter):
                 "status": "success",
                 "date_keys": date_keys,
                 "data": sorted_data,
+                "sorted_data": sorted_data,
             }
         except HTTPException:
             raise
@@ -357,11 +399,16 @@ def register_payment_report_routes(app, sb_getter):
 
     @router.get("/reports/team")
     def get_team_report(
-        date_from: date,
-        date_to: date,
+        from_date: date | None = Query(None, alias="from"),
+        to_date: date | None = Query(None, alias="to"),
+        date_from: date | None = Query(None, include_in_schema=False),
+        date_to: date | None = Query(None, include_in_schema=False),
         authorization: str | None = Header(None),
     ):
         """Báo cáo doanh số theo Team (Aggregated, Early Return, Fallback)."""
+        date_from, date_to = _resolve_report_dates(
+            from_date, to_date, date_from, date_to
+        )
         sb, _ = _guard_and_rbac(date_from, date_to, authorization)
 
         try:
@@ -376,11 +423,16 @@ def register_payment_report_routes(app, sb_getter):
 
     @router.get("/reports/channel")
     def get_channel_report(
-        date_from: date,
-        date_to: date,
+        from_date: date | None = Query(None, alias="from"),
+        to_date: date | None = Query(None, alias="to"),
+        date_from: date | None = Query(None, include_in_schema=False),
+        date_to: date | None = Query(None, include_in_schema=False),
         authorization: str | None = Header(None),
     ):
         """Báo cáo doanh số theo Kênh (Aggregated, Early Return, Fallback)."""
+        date_from, date_to = _resolve_report_dates(
+            from_date, to_date, date_from, date_to
+        )
         sb, _ = _guard_and_rbac(date_from, date_to, authorization)
 
         try:
