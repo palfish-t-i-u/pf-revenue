@@ -350,6 +350,10 @@ updated_at    timestamptz
 | 22 | Fix subtab switching bug | 06/09 | GridSubTab giữ mounted (hidden) khi chuyển tab — không mất data/dropdown |
 | 23 | CurrencyEditor (VNĐ) | 06/09 | Hiện separator (.) lúc gõ số tiền, không phải đợi commit |
 | 24 | Dropdown "Lần TT" | 06/09 | Đổi từ text input sang dropdown `1st`→`10th`, khớp data thực tế trong DB |
+| 25 | GMV exchange rate UI | 06/09 | Manager/system có nút ⚙ mở dialog chỉnh tỷ giá VND/RMB + cutoff date. Lưu DB `app_settings` |
+| 26 | Mobile responsive grid | 06/09 | Unpin columns, ẩn cột phụ, summary cards stack dọc, toolbar responsive trên mobile ≤639px |
+| 27 | Clipboard copy/paste | 06/09 | Ctrl+C/V trên cell (field-based). Copy bất kỳ cell, paste vào cell editable. AG Grid Community custom |
+| 28 | Undo/Redo xác nhận | 06/09 | `undoRedoCellEditing` + limit 20 đã bật — Ctrl+Z/Y hoạt động |
 
 ### TODO
 
@@ -358,10 +362,6 @@ updated_at    timestamptz
 | T1 | Đối soát ngân hàng (sub-tab) | Cao | Upload bank statement → parse → match với payments. Cần làm rõ format file (CSV/Excel? ngân hàng nào?) |
 | T2 | Hoàn thiện Recon v1 | Cao | Unmatched list, manual match UI, CRM aging list |
 | T3 | Bulk CRM import | Trung bình | Endpoint nhận list `crm_order_id` → auto-match với payments (theo uid + ngày?) |
-| T4 | Tỷ giá GMV dynamic có UI config | Thấp | Rule đã sync FE/BE, nhưng chưa có màn hình chỉnh config trong app |
-| T5 | Clipboard (copy/paste cells) | Thấp | Custom implementation (AG Grid Community không có) |
-| T6 | Kiểm thử undo/redo | Thấp | AG Grid đã bật `undoRedoCellEditing`, cần test kỹ với flow thật |
-| T7 | Mobile responsive grid | Thấp | Hiện chỉ ổn trên desktop |
 
 ### Known Issues
 

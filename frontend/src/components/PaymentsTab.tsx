@@ -1,6 +1,7 @@
-﻿import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+﻿import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { cn } from "../lib/cn";
 import { usePermission } from "../hooks/usePermission";
+import { useMe } from "../hooks/useMe";
 import { api } from "../lib/api";
 import { AgGridReact } from "ag-grid-react";
 import {
@@ -14,6 +15,19 @@ import {
 } from "ag-grid-community";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
+
+/* ── Mobile detection hook ── */
+const mobileQuery = "(max-width: 639px)";
+const subscribe = (cb: () => void) => {
+  const mql = window.matchMedia(mobileQuery);
+  mql.addEventListener("change", cb);
+  return () => mql.removeEventListener("change", cb);
+};
+const getSnapshot = () => window.matchMedia(mobileQuery).matches;
+const getServerSnapshot = () => false;
+function useIsMobile() {
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+}
 
 /* ── Types ── */
 type SubTab = "grid" | "reports" | "recon" | "master";
@@ -132,7 +146,7 @@ const gridTheme = themeQuartz.withParams({
 function ToastContainer({ toasts, onDismiss }: { toasts: ToastItem[]; onDismiss: (id: number) => void }) {
   if (!toasts.length) return null;
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+    <div className="fixed bottom-20 right-4 z-50 flex flex-col gap-2 sm:bottom-4">
       {toasts.map((t) => (
         <div key={t.id} onClick={() => onDismiss(t.id)}
           className={cn(
@@ -167,10 +181,10 @@ function SummaryCard({ label, value, sub, tone = "neutral" }: {
     neutral: "text-gmv-text-strong", ok: "text-gmv-ok", warn: "text-gmv-warn", danger: "text-gmv-danger",
   };
   return (
-    <div className="flex flex-col gap-1 rounded-gmv-lg border border-gmv-border bg-gmv-canvas px-4 py-3">
-      <span className="text-xs font-medium text-gmv-muted">{label}</span>
-      <span className={cn("text-2xl font-bold tabular-nums", toneClasses[tone])}>{value}</span>
-      {sub && <span className="text-[11px] text-gmv-muted">{sub}</span>}
+    <div className="flex flex-col gap-0.5 rounded-gmv-lg border border-gmv-border bg-gmv-canvas px-3 py-2 sm:gap-1 sm:px-4 sm:py-3">
+      <span className="text-[10px] font-medium text-gmv-muted sm:text-xs">{label}</span>
+      <span className={cn("text-lg font-bold tabular-nums sm:text-2xl", toneClasses[tone])}>{value}</span>
+      {sub && <span className="hidden text-[11px] text-gmv-muted sm:block">{sub}</span>}
     </div>
   );
 }
@@ -487,7 +501,7 @@ function DetailDialog({ open, onClose, payment, onAction }: {
     <Dialog open={open} onClose={onClose} title="Chi tiết doanh thu" wide>
       <div className="flex flex-col gap-4">
         {/* Info grid */}
-        <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+        <div className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
           <div><span className="text-gmv-muted">Payment ID:</span> <span className="font-mono text-xs">{p.payment_id}</span></div>
           <div><span className="text-gmv-muted">Ngày:</span> {fmtDate(p.pay_time)}</div>
           <div><span className="text-gmv-muted">UID:</span> <span className="font-mono">{p.uid}</span></div>
@@ -836,7 +850,7 @@ function GridContextMenu({ menu, onClose, onDeleteRows, onAddRow }: {
 /* ═══════════════════════════════════════
    Sub-tab: Doanh thu (AG Grid)
    ═══════════════════════════════════════ */
-function GridSubTab({ canWrite, gmvRule }: { canWrite: boolean; gmvRule: GmvRuleMeta }) {
+function GridSubTab({ canWrite, gmvRule, isMobile }: { canWrite: boolean; gmvRule: GmvRuleMeta; isMobile: boolean }) {
   const toast = useToast();
   const gridRef = useRef<AgGridReact>(null);
   const gmvCutoff = useMemo(() => new Date(gmvRule.cutoff_at).getTime(), [gmvRule]);
@@ -947,8 +961,9 @@ function GridSubTab({ canWrite, gmvRule }: { canWrite: boolean; gmvRule: GmvRule
   }, [toast]);
 
   // Column definitions
+  const pin = isMobile ? undefined : ("left" as const);
   const columnDefs = useMemo((): ColDef[] => [
-    { headerName: "Ngày", width: 115, pinned: "left" as const,
+    { headerName: "Ngày", width: isMobile ? 95 : 115, pinned: pin,
       valueGetter: (p: any) => {
         const raw = p.data?.pay_time;
         if (!raw) return "";
@@ -963,32 +978,32 @@ function GridSubTab({ canWrite, gmvRule }: { canWrite: boolean; gmvRule: GmvRule
       editable: canWrite,
       cellEditor: DatePickerEditor,
       sortable: true, filter: true },
-    { field: "uid", headerName: "UID", width: 120, pinned: "left" as const, editable: canWrite },
-    { headerName: "Khách", width: 120, pinned: "left" as const,
+    { field: "uid", headerName: "UID", width: isMobile ? 100 : 120, pinned: pin, editable: canWrite },
+    { headerName: "Khách", width: 120, pinned: pin, hide: isMobile,
       valueGetter: (p: any) => p.data?.customers?.full_name ?? "", editable: canWrite },
-    { headerName: "Sale", width: 100, pinned: "left" as const,
+    { headerName: "Sale", width: 100, pinned: pin,
       valueGetter: (p: any) => p.data?.sales?.short_code ?? p.data?.sales?.full_name ?? "—",
       editable: canWrite,
       cellEditor: "agSelectCellEditor",
       cellEditorParams: { values: saleNames },
     },
-    { field: "team", headerName: "Team", width: 100, editable: false },
-    { headerName: "Kênh", width: 110,
+    { field: "team", headerName: "Team", width: 100, editable: false, hide: isMobile },
+    { headerName: "Kênh", width: 110, hide: isMobile,
       valueGetter: (p: any) => p.data?.channels?.name ?? "—",
       editable: canWrite,
       cellEditor: "agSelectCellEditor",
       cellEditorParams: { values: channelNames },
     },
-    { headerName: "Gói", width: 140,
+    { headerName: "Gói", width: 140, hide: isMobile,
       valueGetter: (p: any) => p.data?.packages?.name ?? "—",
       editable: canWrite,
       cellEditor: "agSelectCellEditor",
       cellEditorParams: { values: packageNames },
     },
-    { field: "real_pay_vnd", headerName: "VNĐ", width: 130, type: "numericColumn",
+    { field: "real_pay_vnd", headerName: "VNĐ", width: isMobile ? 110 : 130, type: "numericColumn",
       valueFormatter: (p: any) => fmtVND(p.value ?? 0), editable: canWrite,
       cellEditor: CurrencyEditor },
-    { field: "gmv_final", headerName: "GMV", width: 110, type: "numericColumn",
+    { field: "gmv_final", headerName: "GMV", width: 110, type: "numericColumn", hide: isMobile,
       valueFormatter: (p: any) => fmtGMV(p.value ?? 0),
       editable: (params: any) => {
         if (!canWrite) return false;
@@ -997,21 +1012,21 @@ function GridSubTab({ canWrite, gmvRule }: { canWrite: boolean; gmvRule: GmvRule
         return new Date(payTime).getTime() < gmvCutoff;
       },
     },
-    { field: "payment_seq", headerName: "Lần", width: 70, editable: canWrite,
+    { field: "payment_seq", headerName: "Lần", width: 70, editable: canWrite, hide: isMobile,
       cellEditor: "agSelectCellEditor",
       cellEditorParams: { values: ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th"] },
     },
     { field: "status", headerName: "TT", width: 80,
       cellRenderer: (p: any) => <StatusBadge status={p.value} />,
       editable: false },
-    { field: "bank_matched", headerName: "NH", width: 65,
+    { field: "bank_matched", headerName: "NH", width: 65, hide: isMobile,
       cellRenderer: (p: any) => <BoolBadge value={p.value} yes="Khớp" no="Chưa" />,
       editable: false },
-    { field: "crm_activated", headerName: "CRM", width: 65,
+    { field: "crm_activated", headerName: "CRM", width: 65, hide: isMobile,
       cellRenderer: (p: any) => <BoolBadge value={p.value} />,
       editable: false },
-    { field: "note", headerName: "Note", width: 150, minWidth: 100, editable: canWrite },
-  ], [canWrite, saleNames, channelNames, packageNames, gmvCutoff]);
+    { field: "note", headerName: "Note", width: 150, minWidth: 100, editable: canWrite, hide: isMobile },
+  ], [canWrite, saleNames, channelNames, packageNames, gmvCutoff, isMobile, pin]);
 
   const defaultColDef = useMemo((): ColDef => ({
     sortable: true,
@@ -1214,10 +1229,66 @@ function GridSubTab({ canWrite, gmvRule }: { canWrite: boolean; gmvRule: GmvRule
     }
   }, [contextMenu, handleBulkDelete, handleInlineDelete]);
 
-  // Keyboard Delete: trigger delete flow for selected rows
+  // Clipboard copy: Ctrl+C on focused cell
+  const handleCopyCell = useCallback(() => {
+    const api = gridRef.current?.api;
+    if (!api) return;
+    const cell = api.getFocusedCell();
+    if (!cell) return;
+    const rowNode = api.getDisplayedRowAtIndex(cell.rowIndex);
+    if (!rowNode) return;
+    const value = api.getValue(cell.column, rowNode);
+    const text = value != null ? String(value) : "";
+    navigator.clipboard.writeText(text).then(() => toast.show("Đã copy", "ok")).catch(() => {});
+  }, [toast]);
+
+  // Clipboard paste: Ctrl+V on focused editable cell (field-based only)
+  const handlePasteCell = useCallback(async () => {
+    if (!canWrite) return;
+    const api = gridRef.current?.api;
+    if (!api) return;
+    const cell = api.getFocusedCell();
+    if (!cell) return;
+    const colDef = cell.column.getColDef();
+    const field = colDef.field;
+    // Only support field-based columns (not valueGetter like Sale/Kênh/Gói)
+    if (!field) return;
+    const rowNode = api.getDisplayedRowAtIndex(cell.rowIndex);
+    if (!rowNode) return;
+    const isEditable = typeof colDef.editable === "function"
+      ? colDef.editable({ node: rowNode, data: rowNode.data, column: cell.column, colDef, api } as any)
+      : colDef.editable;
+    if (!isEditable) return;
+    try {
+      const text = (await navigator.clipboard.readText()).trim();
+      if (!text) return;
+      // Use setDataValue to trigger onCellValueChanged → auto-save
+      rowNode.setDataValue(field, text);
+      toast.show("Đã paste", "ok");
+    } catch {
+      // Clipboard read permission denied
+    }
+  }, [canWrite, toast]);
+
+  // Keyboard handler: Delete, Ctrl+C, Ctrl+V
   const handleCellKeyDown = useCallback((event: CellKeyDownEvent<Payment>) => {
     const nativeEvent = event.event as KeyboardEvent | null | undefined;
-    if (!nativeEvent || nativeEvent.key !== "Delete") return;
+    if (!nativeEvent) return;
+    const isCtrl = nativeEvent.ctrlKey || nativeEvent.metaKey;
+    // Ctrl+C: copy
+    if (isCtrl && nativeEvent.key === "c") {
+      nativeEvent.preventDefault();
+      handleCopyCell();
+      return;
+    }
+    // Ctrl+V: paste
+    if (isCtrl && nativeEvent.key === "v") {
+      nativeEvent.preventDefault();
+      handlePasteCell();
+      return;
+    }
+    // Delete key
+    if (nativeEvent.key !== "Delete") return;
     if (!canWrite) return;
     const selected = gridRef.current?.api?.getSelectedRows() as Payment[] | undefined;
     if (selected && selected.length > 1) {
@@ -1231,7 +1302,7 @@ function GridSubTab({ canWrite, gmvRule }: { canWrite: boolean; gmvRule: GmvRule
     } else {
       setDeletePending(paymentId);
     }
-  }, [canWrite, deletePending, handleInlineDelete, handleBulkDelete]);
+  }, [canWrite, deletePending, handleInlineDelete, handleBulkDelete, handleCopyCell, handlePasteCell]);
 
   // Post-add: after fetchData resolves, scroll to and flash the new row
   const handleAddSuccess = useCallback(async (newPaymentId?: string) => {
@@ -1265,48 +1336,54 @@ function GridSubTab({ canWrite, gmvRule }: { canWrite: boolean; gmvRule: GmvRule
       </div>
 
       {/* Toolbar */}
-      <div className="mb-2 flex flex-wrap items-center gap-2">
-        {canWrite && (
-          <button type="button" onClick={() => setShowAdd(true)} className={cn(btnPrimary, "gap-1.5")}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            Thêm doanh thu
+      <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className="flex flex-wrap items-center gap-2">
+          {canWrite && (
+            <button type="button" onClick={() => setShowAdd(true)} className={cn(btnPrimary, "gap-1.5 text-xs sm:text-sm")}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              <span className="hidden sm:inline">Thêm doanh thu</span>
+              <span className="sm:hidden">Thêm</span>
+            </button>
+          )}
+          {canWrite && (
+            <button type="button" onClick={() => setShowImport(true)} className={cn(btnSecondary, "text-xs sm:text-sm")}>Import</button>
+          )}
+          <button type="button" onClick={handleExport} className={cn(btnSecondary, "text-xs sm:text-sm")}>
+            <span className="hidden sm:inline">Xuất Excel</span>
+            <span className="sm:hidden">Excel</span>
           </button>
-        )}
-        {canWrite && (
-          <button type="button" onClick={() => setShowImport(true)} className={btnSecondary}>Import từ file</button>
-        )}
-        <button type="button" onClick={handleExport} className={btnSecondary}>Xuất Excel</button>
-        <div className="flex-1" />
-        <button type="button" onClick={() => setShowFilters(!showFilters)}
-          className={cn(btnSecondary, showFilters && "bg-gmv-primary/10 text-gmv-primary")}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-          </svg>
-          Lọc{(filterSale || filterChannel || filterPackage || filterDateFrom || filterDateTo) ? " ●" : ""}
-        </button>
+          <div className="hidden flex-1 sm:block" />
+          <button type="button" onClick={() => setShowFilters(!showFilters)}
+            className={cn(btnSecondary, "text-xs sm:text-sm", showFilters && "bg-gmv-primary/10 text-gmv-primary")}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+            </svg>
+            Lọc{(filterSale || filterChannel || filterPackage || filterDateFrom || filterDateTo) ? " ●" : ""}
+          </button>
+        </div>
         <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
-          placeholder="Tìm uid, tên, sale, kênh, gói..." className={cn(inputCls, "w-56")} />
+          placeholder="Tìm uid, tên, sale, kênh, gói..." className={cn(inputCls, "w-full sm:w-56")} />
       </div>
 
       {/* Advanced filters row */}
       {showFilters && (
-        <div className="mb-2 flex flex-wrap items-end gap-2 rounded-gmv-lg border border-gmv-border bg-gmv-bg/50 px-3 py-2">
+        <div className="mb-2 grid grid-cols-2 items-end gap-2 rounded-gmv-lg border border-gmv-border bg-gmv-bg/50 px-3 py-2 sm:flex sm:flex-wrap">
           <div className="flex flex-col gap-0.5">
             <label className="text-[11px] font-medium text-gmv-muted">Từ ngày</label>
             <input type="date" value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)}
-              className={cn(inputCls, "w-36 text-xs")} />
+              className={cn(inputCls, "w-full text-xs sm:w-36")} />
           </div>
           <div className="flex flex-col gap-0.5">
             <label className="text-[11px] font-medium text-gmv-muted">Đến ngày</label>
             <input type="date" value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)}
-              className={cn(inputCls, "w-36 text-xs")} />
+              className={cn(inputCls, "w-full text-xs sm:w-36")} />
           </div>
           <div className="flex flex-col gap-0.5">
             <label className="text-[11px] font-medium text-gmv-muted">Sale</label>
             <select value={filterSale} onChange={(e) => setFilterSale(e.target.value)}
-              className={cn(inputCls, "w-36 text-xs")}>
+              className={cn(inputCls, "w-full text-xs sm:w-36")}>
               <option value="">Tất cả</option>
               {salesList.map((s: any) => <option key={s.id} value={s.id}>{s.short_code || s.full_name}</option>)}
             </select>
@@ -1314,7 +1391,7 @@ function GridSubTab({ canWrite, gmvRule }: { canWrite: boolean; gmvRule: GmvRule
           <div className="flex flex-col gap-0.5">
             <label className="text-[11px] font-medium text-gmv-muted">Kênh</label>
             <select value={filterChannel} onChange={(e) => setFilterChannel(e.target.value)}
-              className={cn(inputCls, "w-36 text-xs")}>
+              className={cn(inputCls, "w-full text-xs sm:w-36")}>
               <option value="">Tất cả</option>
               {channelsList.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
@@ -1322,25 +1399,25 @@ function GridSubTab({ canWrite, gmvRule }: { canWrite: boolean; gmvRule: GmvRule
           <div className="flex flex-col gap-0.5">
             <label className="text-[11px] font-medium text-gmv-muted">Gói</label>
             <select value={filterPackage} onChange={(e) => setFilterPackage(e.target.value)}
-              className={cn(inputCls, "w-44 text-xs")}>
+              className={cn(inputCls, "w-full text-xs sm:w-44")}>
               <option value="">Tất cả</option>
               {packagesList.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </div>
           <button type="button"
             onClick={() => { setFilterSale(""); setFilterChannel(""); setFilterPackage(""); setFilterDateFrom(""); setFilterDateTo(""); }}
-            className="self-end pb-1 text-xs text-gmv-muted hover:text-gmv-text">
+            className="col-span-2 self-end pb-1 text-xs text-gmv-muted hover:text-gmv-text sm:col-span-1">
             Xóa lọc
           </button>
         </div>
       )}
 
       {/* Team filter tabs + quick filters */}
-      <div className="mb-1 flex items-center gap-1 border-b border-gmv-border">
+      <div className="mb-1 flex items-center gap-1 overflow-x-auto border-b border-gmv-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {TEAMS.map((tab) => (
           <button key={tab} type="button" onClick={() => setTeamFilter(tab)}
             className={cn(
-              "border-b-2 px-3 py-1.5 text-sm font-medium transition",
+              "shrink-0 border-b-2 px-2.5 py-1.5 text-xs font-medium transition sm:px-3 sm:text-sm",
               teamFilter === tab
                 ? "border-gmv-primary text-gmv-primary"
                 : "border-transparent text-gmv-muted hover:border-gmv-border hover:text-gmv-text"
@@ -1348,7 +1425,7 @@ function GridSubTab({ canWrite, gmvRule }: { canWrite: boolean; gmvRule: GmvRule
             {tab}
           </button>
         ))}
-        <div className="mx-2 h-4 w-px bg-gmv-border" />
+        <div className="mx-2 h-4 w-px shrink-0 bg-gmv-border" />
         {([
           { key: "unmatched_bank" as const, label: "Chưa khớp NH", count: summary.unmatched_bank },
           { key: "uncrm" as const, label: "Chưa CRM", count: summary.uncrm },
@@ -1356,7 +1433,7 @@ function GridSubTab({ canWrite, gmvRule }: { canWrite: boolean; gmvRule: GmvRule
           <button key={f.key} type="button"
             onClick={() => setQuickFilter(quickFilter === f.key ? "" : f.key)}
             className={cn(
-              "rounded-full px-2.5 py-1 text-xs font-medium transition",
+              "shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium transition",
               quickFilter === f.key
                 ? "bg-amber-100 text-amber-800"
                 : "bg-gmv-bg text-gmv-muted hover:bg-gmv-border hover:text-gmv-text"
@@ -1372,7 +1449,7 @@ function GridSubTab({ canWrite, gmvRule }: { canWrite: boolean; gmvRule: GmvRule
           Không có dữ liệu {teamFilter !== "Tất cả" ? `cho team "${teamFilter}"` : ""}
         </div>
       ) : (
-        <div className="min-h-0 flex-1" onContextMenu={(e) => { if (canWrite) e.preventDefault(); }}>
+        <div className="min-h-[300px] flex-1 sm:min-h-0" onContextMenu={(e) => { if (canWrite) e.preventDefault(); }}>
           <AgGridReact
             ref={gridRef}
             theme={gridTheme}
@@ -1397,8 +1474,8 @@ function GridSubTab({ canWrite, gmvRule }: { canWrite: boolean; gmvRule: GmvRule
 
       {/* Pagination */}
       {total > pageSize && (
-        <div className="flex shrink-0 items-center justify-between py-1 text-sm text-gmv-muted">
-          <span>Hiện {items.length} / {total.toLocaleString("vi-VN")} dòng</span>
+        <div className="flex shrink-0 flex-col items-center gap-1 py-1 text-sm text-gmv-muted sm:flex-row sm:justify-between">
+          <span className="text-xs">{items.length} / {total.toLocaleString("vi-VN")} dòng</span>
           <div className="flex gap-1">
             <button type="button" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}
               className="rounded-gmv-md border border-gmv-border bg-gmv-canvas px-3 py-1 text-xs font-medium disabled:opacity-40">Trước</button>
@@ -1479,7 +1556,7 @@ function ReportsSubTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
         <div className="flex gap-1">
           {REPORT_TABS.map((tab) => (
             <button key={tab.id} type="button" onClick={() => setActiveReport(tab.id)}
@@ -1490,14 +1567,14 @@ function ReportsSubTab() {
             </button>
           ))}
         </div>
-        <div className="flex-1" />
+        <div className="hidden flex-1 sm:block" />
         <div className="flex items-center gap-2 text-sm">
           <label className="text-gmv-muted">Từ</label>
           <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
-            className="rounded-gmv-md border border-gmv-border bg-gmv-canvas px-2.5 py-1.5 text-sm text-gmv-text focus:border-gmv-primary focus:outline-none" />
+            className="w-full rounded-gmv-md border border-gmv-border bg-gmv-canvas px-2.5 py-1.5 text-sm text-gmv-text focus:border-gmv-primary focus:outline-none sm:w-auto" />
           <label className="text-gmv-muted">đến</label>
           <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
-            className="rounded-gmv-md border border-gmv-border bg-gmv-canvas px-2.5 py-1.5 text-sm text-gmv-text focus:border-gmv-primary focus:outline-none" />
+            className="w-full rounded-gmv-md border border-gmv-border bg-gmv-canvas px-2.5 py-1.5 text-sm text-gmv-text focus:border-gmv-primary focus:outline-none sm:w-auto" />
         </div>
         <button type="button" onClick={handleExport}
           className="inline-flex items-center gap-1.5 rounded-gmv-md border border-gmv-border bg-gmv-canvas px-3 py-1.5 text-sm font-medium text-gmv-text-strong shadow-gmv-1 transition hover:bg-gmv-bg">
@@ -1826,7 +1903,7 @@ function MasterSubTab({ canWrite }: { canWrite: boolean }) {
         ))}
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         {canWrite && activeMaster !== "customers" && (
           <button type="button" onClick={() => setShowAdd(true)} className={cn(btnPrimary, "gap-1.5")}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -1835,10 +1912,10 @@ function MasterSubTab({ canWrite }: { canWrite: boolean }) {
             Thêm {current.label}
           </button>
         )}
-        <div className="flex-1" />
+        <div className="hidden flex-1 sm:block" />
         <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
           placeholder={activeMaster === "customers" ? "Nhập uid, tên hoặc SĐT để tìm..." : `Tìm ${current.label.toLowerCase()}...`}
-          className={cn(inputCls, "w-64")} />
+          className={cn(inputCls, "w-full sm:w-64")} />
       </div>
 
       {loading ? <TableSkeleton cols={current.columns.length} rows={6} /> : filteredRows.length === 0 ? (
@@ -1871,6 +1948,72 @@ function MasterSubTab({ canWrite }: { canWrite: boolean }) {
   );
 }
 
+/* ── GMV Settings Dialog (manager+ only) ── */
+function GmvSettingsDialog({ open, onClose, gmvRule, onSaved }: {
+  open: boolean; onClose: () => void; gmvRule: GmvRuleMeta; onSaved: (rule: GmvRuleMeta) => void;
+}) {
+  const [rate, setRate] = useState(String(gmvRule.exchange_rate));
+  const [cutoff, setCutoff] = useState(gmvRule.cutoff_at.slice(0, 10));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (open) {
+      setRate(String(gmvRule.exchange_rate));
+      setCutoff(gmvRule.cutoff_at.slice(0, 10));
+      setError("");
+    }
+  }, [open, gmvRule]);
+
+  const handleSave = async () => {
+    const rateNum = Number(rate);
+    if (!rateNum || rateNum <= 0) { setError("Tỷ giá phải > 0"); return; }
+    setSaving(true);
+    setError("");
+    try {
+      const body: { exchange_rate?: number; cutoff_at?: string } = {};
+      if (rateNum !== gmvRule.exchange_rate) body.exchange_rate = rateNum;
+      if (cutoff !== gmvRule.cutoff_at.slice(0, 10)) body.cutoff_at = `${cutoff}T00:00:00+00:00`;
+      if (Object.keys(body).length === 0) { onClose(); return; }
+      const res = await api.put("/api/v1/settings/gmv", body);
+      onSaved({
+        exchange_rate: Number(res.data.exchange_rate),
+        cutoff_at: String(res.data.cutoff_at),
+      });
+      onClose();
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || "Lỗi khi lưu cài đặt");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} title="Cài đặt tỷ giá GMV">
+      <div className="flex flex-col gap-4">
+        <FormField label="Tỷ giá (VND/RMB)" required>
+          <input type="number" value={rate} onChange={(e) => setRate(e.target.value)}
+            min="1" step="100" className={cn(inputCls, "w-full")} />
+        </FormField>
+        <FormField label="Mốc áp dụng (cutoff date)">
+          <input type="date" value={cutoff} onChange={(e) => setCutoff(e.target.value)}
+            className={cn(inputCls, "w-full")} />
+        </FormField>
+        <p className="text-xs text-gmv-muted">
+          Trước mốc cutoff: GMV = gmv_rmb. Từ mốc cutoff: GMV = real_pay_vnd / tỷ giá.
+        </p>
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className={btnSecondary}>Huỷ</button>
+          <button type="button" onClick={handleSave} disabled={saving} className={btnPrimary}>
+            {saving ? "Đang lưu..." : "Lưu"}
+          </button>
+        </div>
+      </div>
+    </Dialog>
+  );
+}
+
 /* ═══════════════════════════════════════
    Main PaymentsTab
    ═══════════════════════════════════════ */
@@ -1878,7 +2021,11 @@ export default function PaymentsTab() {
   const [activeSubTab, setActiveSubTab] = useState<SubTab>("grid");
   const [gmvRule, setGmvRule] = useState<GmvRuleMeta>(DEFAULT_GMV_RULE);
   const { readOnly } = usePermission("payments");
+  const { profile } = useMe();
   const canWrite = !readOnly;
+  const isMobile = useIsMobile();
+  const isManager = profile?.role === "manager" || profile?.role === "system";
+  const [showGmvSettings, setShowGmvSettings] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -1899,26 +2046,46 @@ export default function PaymentsTab() {
 
   return (
     <div className="flex flex-col overflow-hidden" style={{ height: "calc(100vh - 112px)" }}>
-      <div className="mb-2 flex shrink-0 items-center gap-1.5 rounded-gmv-lg bg-gmv-bg p-1.5">
+      <div className="mb-2 flex shrink-0 items-center gap-1 overflow-x-auto rounded-gmv-lg bg-gmv-bg p-1 sm:gap-1.5 sm:p-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {SUB_TABS.map((tab) => (
           <button key={tab.id} type="button" onClick={() => setActiveSubTab(tab.id)}
-            className={cn("rounded-gmv-md px-4 py-2 text-sm font-semibold transition",
+            className={cn("shrink-0 rounded-gmv-md px-3 py-1.5 text-xs font-semibold transition sm:px-4 sm:py-2 sm:text-sm",
               activeSubTab === tab.id ? tab.activeClass : tab.inactiveClass
             )}>
             {tab.label}
           </button>
         ))}
+        {isManager && (
+          <>
+            <div className="flex-1" />
+            <button type="button" onClick={() => setShowGmvSettings(true)}
+              className="flex items-center gap-1.5 rounded-gmv-md px-3 py-2 text-xs font-medium text-gmv-muted hover:bg-gmv-bg hover:text-gmv-text transition">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+              Tỷ giá: {gmvRule.exchange_rate.toLocaleString("vi-VN")}
+            </button>
+          </>
+        )}
       </div>
 
       <div className="min-h-0 flex-1">
         {/* Grid stays mounted (hidden) to preserve state + master data across tab switches */}
         <div className={activeSubTab === "grid" ? "flex h-full flex-col" : "hidden"}>
-          <GridSubTab canWrite={canWrite} gmvRule={gmvRule} />
+          <GridSubTab canWrite={canWrite} gmvRule={gmvRule} isMobile={isMobile} />
         </div>
         {activeSubTab === "reports" && <ReportsSubTab />}
         {activeSubTab === "recon" && <ReconSubTab />}
         {activeSubTab === "master" && <MasterSubTab canWrite={canWrite} />}
       </div>
+
+      <GmvSettingsDialog
+        open={showGmvSettings}
+        onClose={() => setShowGmvSettings(false)}
+        gmvRule={gmvRule}
+        onSaved={setGmvRule}
+      />
     </div>
   );
 }

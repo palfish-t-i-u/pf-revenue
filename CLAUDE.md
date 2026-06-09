@@ -45,16 +45,19 @@ cd frontend && npx tsc --noEmit
 - `backend/payment_routes.py` — Payments CRUD, master data, filters
 - `backend/payment_report_routes.py` — BCTB, team, channel reports, recon/internal
 - `backend/payment_logic.py` — GMV calculation
-- `backend/migrations/` — Versioned SQL: DDL tables + RPC functions (001–004)
+- `backend/migrations/` — Versioned SQL: DDL tables + RPC functions (001–005)
 
 ### Full docs
 - `docs/PROJECT.md` — Design spec, tech spec, API reference, progress tracking
 
 ## AG Grid Notes
-- Using **Community** (free) tier — no clipboard, enterprise context menu, or range selection
+- Using **Community** (free) tier — no enterprise context menu or range selection
+- Custom clipboard: Ctrl+C copy cell value, Ctrl+V paste into editable field-based cells
+- Undo/redo: `undoRedoCellEditing` enabled, limit 20 (Ctrl+Z / Ctrl+Y)
 - Custom implementations: DatePickerEditor, CurrencyEditor, GridContextMenu, multi-row selection via config
 - Worksheet-style UX: single-click edit, dropdown selectors, auto-save on blur
-- 4 pinned (frozen) columns: Ngày, UID, Khách, Sale
+- 4 pinned (frozen) columns on desktop: Ngày, UID, Khách, Sale (unpinned on mobile)
+- Mobile responsive: columns hidden/unpinned at ≤639px, summary cards stack vertically
 
 ## RBAC Model
 - 4 roles: sale (1) < leader (2) < manager (3) < system (4)
@@ -63,7 +66,8 @@ cd frontend && npx tsc --noEmit
 - Per-user overrides supported
 
 ## Business Logic
-- GMV calculation: before 01/06/2026 uses `gmv_rmb`; after uses `real_pay_vnd / 3700`
+- GMV calculation: before 01/06/2026 uses `gmv_rmb`; after uses `real_pay_vnd / exchange_rate` (configurable via app_settings DB table, default 3700)
+- GMV settings UI: manager/system roles can change exchange rate + cutoff date via ⚙ button
 - Summary aggregation via Supabase RPC `payments_summary()` (not client-side)
 - Internal reconciliation via RPC `get_payment_warnings()` — checks DUPLICATE, MISSING_DATA, ORPHAN_DATA, RATE_DEVIATION
 - Quick filters on grid: "Chưa khớp NH" (bank_matched=false), "Chưa CRM" (crm_activated=false)

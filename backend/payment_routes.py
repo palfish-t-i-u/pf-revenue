@@ -14,7 +14,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from admin_routes import require_module_access, require_module_write
-from payment_logic import compute_gmv_final, get_gmv_rule_meta
+from payment_logic import compute_gmv_final, ensure_settings_loaded, get_gmv_rule_meta, refresh_settings
 from rbac import require_min_role, resolve_actor
 from sheet_row_parsers import parse_danang_row, parse_hcm_rev_row, parse_sm_hanoi_row
 
@@ -592,7 +592,56 @@ def register_payment_routes(app, sb_getter) -> None:
         sb = _sb()
         actor = resolve_actor(sb, authorization)
         require_module_access(sb, actor, "payments")
+        ensure_settings_loaded(sb)
         return {"gmv_rule": get_payment_gmv_meta()}
+
+    # ── GMV Settings endpoints ──────────────────────────────────────────
+    @app.get("/api/v1/settings/gmv", tags=["Settings"])
+    def get_gmv_settings(authorization: str | None = Header(None)):
+        sb = _sb()
+        actor = resolve_actor(sb, authorization)
+        require_module_access(sb, actor, "payments")
+        ensure_settings_loaded(sb)
+        return get_gmv_rule_meta()
+
+    class GmvSettingsUpdate(BaseModel):
+        exchange_rate: float | None = None
+        cutoff_at: str | None = None
+
+    @app.put("/api/v1/settings/gmv", tags=["Settings"])
+    def update_gmv_settings(
+        body: GmvSettingsUpdate,
+        authorization: str | None = Header(None),
+    ):
+        sb = _sb()
+        actor = resolve_actor(sb, authorization)
+        require_min_role(actor, "manager")
+
+        if body.exchange_rate is not None:
+            if body.exchange_rate <= 0:
+                raise HTTPException(400, "exchange_rate phải > 0")
+            sb.table("app_settings").upsert({
+                "key": "gmv_exchange_rate",
+                "value": body.exchange_rate,
+                "updated_at": _now_iso(),
+                "updated_by": actor.user_id,
+            }).execute()
+
+        if body.cutoff_at is not None:
+            # Validate ISO format
+            try:
+                datetime.fromisoformat(body.cutoff_at.replace("Z", "+00:00"))
+            except ValueError:
+                raise HTTPException(400, "cutoff_at phải là ISO datetime hợp lệ")
+            sb.table("app_settings").upsert({
+                "key": "gmv_cutoff_at",
+                "value": body.cutoff_at,
+                "updated_at": _now_iso(),
+                "updated_by": actor.user_id,
+            }).execute()
+
+        refresh_settings(sb)
+        return get_gmv_rule_meta()
 
     @app.get("/api/v1/payments", tags=["Payments"])
     def list_payments(
