@@ -1237,7 +1237,13 @@ function GridSubTab({ canWrite, gmvRule, isMobile }: { canWrite: boolean; gmvRul
     if (!cell) return;
     const rowNode = api.getDisplayedRowAtIndex(cell.rowIndex);
     if (!rowNode) return;
-    const value = api.getValue(cell.column, rowNode);
+    const colDef = cell.column.getColDef();
+    let value: unknown;
+    if (colDef.valueGetter && typeof colDef.valueGetter === "function") {
+      value = colDef.valueGetter({ data: rowNode.data, node: rowNode, column: cell.column, colDef, api } as any);
+    } else if (colDef.field) {
+      value = rowNode.data?.[colDef.field];
+    }
     const text = value != null ? String(value) : "";
     navigator.clipboard.writeText(text).then(() => toast.show("Đã copy", "ok")).catch(() => {});
   }, [toast]);
