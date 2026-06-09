@@ -809,6 +809,7 @@ function GridSubTab({ canWrite, gmvRule }: { canWrite: boolean; gmvRule: GmvRule
   const gridRef = useRef<AgGridReact>(null);
   const gmvCutoff = useMemo(() => new Date(gmvRule.cutoff_at).getTime(), [gmvRule]);
   const [teamFilter, setTeamFilter] = useState("Tất cả");
+  const [quickFilter, setQuickFilter] = useState<"" | "unmatched_bank" | "uncrm">("");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<Payment[]>([]);
@@ -847,6 +848,8 @@ function GridSubTab({ canWrite, gmvRule }: { canWrite: boolean; gmvRule: GmvRule
       const params: Record<string, string | number> = { page, page_size: pageSize };
       if (teamFilter !== "Tất cả") params.team = teamFilter;
       if (search.trim()) params.search = search.trim();
+      if (quickFilter === "unmatched_bank") params.bank_matched = "false";
+      if (quickFilter === "uncrm") params.crm_activated = "false";
       const res = await api.get("/api/v1/payments", { params });
       setItems(res.data.items || []);
       setTotal(res.data.total || 0);
@@ -856,10 +859,10 @@ function GridSubTab({ canWrite, gmvRule }: { canWrite: boolean; gmvRule: GmvRule
     } finally {
       setLoading(false);
     }
-  }, [teamFilter, search, page]);
+  }, [teamFilter, quickFilter, search, page]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-  useEffect(() => { setPage(1); }, [teamFilter, search]);
+  useEffect(() => { setPage(1); }, [teamFilter, quickFilter, search]);
   // Reset pending delete when data reloads (page/filter change)
   useEffect(() => { setDeletePending(null); }, [items]);
 
@@ -1233,8 +1236,8 @@ function GridSubTab({ canWrite, gmvRule }: { canWrite: boolean; gmvRule: GmvRule
           placeholder="Tìm uid, tên, SĐT..." className={cn(inputCls, "w-56")} />
       </div>
 
-      {/* Team filter tabs */}
-      <div className="mb-1 flex gap-1 border-b border-gmv-border">
+      {/* Team filter tabs + quick filters */}
+      <div className="mb-1 flex items-center gap-1 border-b border-gmv-border">
         {TEAMS.map((tab) => (
           <button key={tab} type="button" onClick={() => setTeamFilter(tab)}
             className={cn(
@@ -1244,6 +1247,22 @@ function GridSubTab({ canWrite, gmvRule }: { canWrite: boolean; gmvRule: GmvRule
                 : "border-transparent text-gmv-muted hover:border-gmv-border hover:text-gmv-text"
             )}>
             {tab}
+          </button>
+        ))}
+        <div className="mx-2 h-4 w-px bg-gmv-border" />
+        {([
+          { key: "unmatched_bank" as const, label: "Chưa khớp NH", count: summary.unmatched_bank },
+          { key: "uncrm" as const, label: "Chưa CRM", count: summary.uncrm },
+        ]).map((f) => (
+          <button key={f.key} type="button"
+            onClick={() => setQuickFilter(quickFilter === f.key ? "" : f.key)}
+            className={cn(
+              "rounded-full px-2.5 py-1 text-xs font-medium transition",
+              quickFilter === f.key
+                ? "bg-amber-100 text-amber-800"
+                : "bg-gmv-bg text-gmv-muted hover:bg-gmv-border hover:text-gmv-text"
+            )}>
+            {f.label}{f.count != null ? ` (${f.count})` : ""}
           </button>
         ))}
       </div>
@@ -1553,7 +1572,9 @@ function ReconSubTab() {
             <thead>
               <tr className="bg-gmv-table-head">
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gmv-muted">Loại</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gmv-muted">Payment ID</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gmv-muted">UID</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gmv-muted">Ngày</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold uppercase text-gmv-muted">VNĐ</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gmv-muted">Chi tiết</th>
               </tr>
             </thead>
@@ -1568,7 +1589,9 @@ function ReconSubTab() {
                         {meta.label}
                       </span>
                     </td>
-                    <td className="px-4 py-2.5 font-mono text-xs">{w.payment_id ?? "—"}</td>
+                    <td className="px-4 py-2.5 font-mono text-xs">{w.uid ?? "—"}</td>
+                    <td className="px-4 py-2.5 text-xs">{w.day ?? "—"}</td>
+                    <td className="px-4 py-2.5 text-right text-xs font-mono">{w.real_pay_vnd != null ? Number(w.real_pay_vnd).toLocaleString("vi-VN") : "—"}</td>
                     <td className="px-4 py-2.5 text-xs text-gmv-muted">
                       {w.message ?? (w.details ? JSON.stringify(w.details) : "—")}
                     </td>

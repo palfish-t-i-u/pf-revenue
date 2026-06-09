@@ -290,10 +290,14 @@ updated_at    timestamptz
 
 - `payments_summary(...)` — Server-side aggregate thay vì fetch all rows. Trả về count, gmv_final, real_pay_vnd, unmatched_bank, uncrm. Hỗ trợ filter theo search, date range, team, channel, sale, status.
 
+**RPC functions:**
+
+- `get_payment_warnings(base_rate, threshold)` — Check 4 loại warning: DUPLICATE, MISSING_DATA, ORPHAN_DATA, RATE_DEVIATION. Trả JSON array.
+
 **Lưu ý trạng thái DB hiện tại:**
 
-- `get_payment_warnings(...)` đang được gọi từ app cho cảnh báo nội bộ, nhưng SQL/RPC definition chưa được version trong repo.
-- Các bảng recon như `bank_transactions`, `crm_orders` đã có trong docs nhưng flow nghiệp vụ tương ứng vẫn chưa hoàn thiện ở app.
+- Tất cả DDL + RPC đã version trong `backend/migrations/` (001–004).
+- `bank_transactions` và `crm_orders` có schema nhưng chưa có data — chờ xác nhận flow nghiệp vụ.
 
 ### 3.4 Deployment
 
@@ -338,28 +342,30 @@ updated_at    timestamptz
 | 14 | GMV rule sync FE/BE | 06/09 | Thêm `GET /api/v1/payments/meta`, FE dùng rule từ BE thay vì hard-code |
 | 15 | Reports contract fix | 06/09 | Reports nhận `from/to`, giữ compatibility `date_from/date_to`, BCTB trả `date_keys + data + sorted_data` |
 | 16 | Reports logic fix | 06/09 | Reports chỉ tính `status='active'`, BCTB thêm alias `full_name` để payload ổn định hơn |
+| 17 | Version DB contract (T4) | 06/09 | Dump tất cả DDL + RPC vào `backend/migrations/` — 4 files |
+| 18 | RPC `get_payment_warnings` | 06/09 | Tạo + deploy lên Supabase. Check: DUPLICATE, MISSING_DATA, ORPHAN_DATA, RATE_DEVIATION |
+| 19 | Fix ReconSubTab | 06/09 | Tab Đối soát nội bộ hoạt động — hiển thị UID, ngày, VNĐ, chi tiết warning |
+| 20 | Quick filter Chưa NH / Chưa CRM | 06/09 | Pill buttons trên grid, toggle filter `bank_matched=false` / `crm_activated=false` |
 
 ### TODO
 
 | # | Hạng mục | Ưu tiên | Chi tiết |
 |---|---|---|---|
-| T1 | Đối soát ngân hàng (sub-tab) | Cao | Upload bank statement → match với payments |
-| T2 | CRM activation sync | Cao | Link crm_order_id, mark crm_activated |
-| T3 | Hoàn thiện Recon v1 | Cao | Bank upload, unmatched list, manual match, CRM aging list |
-| T4 | Version DB contract cho recon | Cao | SQL/RPC cho `get_payment_warnings`, `bank_transactions`, `crm_orders` chưa nằm trong repo |
-| T5 | Tỷ giá GMV dynamic có UI config | Thấp | Rule đã sync FE/BE, nhưng chưa có màn hình chỉnh config trong app |
-| T6 | Clipboard (copy/paste cells) | Thấp | Custom implementation (AG Grid Community không có) |
-| T7 | Kiểm thử undo/redo | Thấp | AG Grid đã bật `undoRedoCellEditing`, cần test kỹ với flow thật |
-| T8 | Mobile responsive grid | Thấp | Hiện chỉ ổn trên desktop |
+| T1 | Đối soát ngân hàng (sub-tab) | Cao | Upload bank statement → parse → match với payments. Cần làm rõ format file (CSV/Excel? ngân hàng nào?) |
+| T2 | Hoàn thiện Recon v1 | Cao | Unmatched list, manual match UI, CRM aging list |
+| T3 | Bulk CRM import | Trung bình | Endpoint nhận list `crm_order_id` → auto-match với payments (theo uid + ngày?) |
+| T4 | Tỷ giá GMV dynamic có UI config | Thấp | Rule đã sync FE/BE, nhưng chưa có màn hình chỉnh config trong app |
+| T5 | Clipboard (copy/paste cells) | Thấp | Custom implementation (AG Grid Community không có) |
+| T6 | Kiểm thử undo/redo | Thấp | AG Grid đã bật `undoRedoCellEditing`, cần test kỹ với flow thật |
+| T7 | Mobile responsive grid | Thấp | Hiện chỉ ổn trên desktop |
 
 ### Known Issues
 
-- `.env.local` đang trỏ `localhost:8000` — cần đổi về Render URL trước khi deploy
 - Backend hay die trên localhost (cần restart manual)
 - AG Grid `suppressContextMenu` có thể là Enterprise-only — đã có fallback `onContextMenu` trên wrapper div
 - 401 errors nếu thiếu Supabase env vars trong `.env.local`
 - Chưa có E2E framework chính thức trong repo; hiện mới phù hợp browser smoke-check song song khi dev
-- `Recon` vẫn phụ thuộc DB contract ngoài repo, nên chưa nên triển khai sâu trước khi chốt rule với Đức
+- `bank_transactions` và `crm_orders` schema có trên Supabase nhưng chưa có data — cần xác nhận flow nghiệp vụ trước khi build upload/import
 
 ---
 

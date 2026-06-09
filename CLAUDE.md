@@ -43,8 +43,9 @@ cd frontend && npx tsc --noEmit
 - `backend/rbac.py` — Role hierarchy (sale < leader < manager < system), scope enforcement
 - `backend/admin_routes.py` — /me, auth users, permissions CRUD
 - `backend/payment_routes.py` — Payments CRUD, master data, filters
-- `backend/payment_report_routes.py` — BCTB, team, channel reports
+- `backend/payment_report_routes.py` — BCTB, team, channel reports, recon/internal
 - `backend/payment_logic.py` — GMV calculation
+- `backend/migrations/` — Versioned SQL: DDL tables + RPC functions (001–004)
 
 ### Full docs
 - `docs/PROJECT.md` — Design spec, tech spec, API reference, progress tracking
@@ -64,5 +65,7 @@ cd frontend && npx tsc --noEmit
 ## Business Logic
 - GMV calculation: before 01/06/2026 uses `gmv_rmb`; after uses `real_pay_vnd / 3700`
 - Summary aggregation via Supabase RPC `payments_summary()` (not client-side)
+- Internal reconciliation via RPC `get_payment_warnings()` — checks DUPLICATE, MISSING_DATA, ORPHAN_DATA, RATE_DEVIATION
+- Quick filters on grid: "Chưa khớp NH" (bank_matched=false), "Chưa CRM" (crm_activated=false)
 - Soft delete: `deleted_at` timestamp, filtered out in queries
 - Pagination: 50 rows/page, server-side
