@@ -821,7 +821,7 @@ function GridSubTab({ canWrite }: { canWrite: boolean }) {
   // Context menu + inline delete
   const [contextMenu, setContextMenu] = useState<CtxMenuState | null>(null);
   const [deletePending, setDeletePending] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState<string | null>(null);
+  const [, setDeleting] = useState<string | null>(null);
 
   // Load master data once
   useEffect(() => {
