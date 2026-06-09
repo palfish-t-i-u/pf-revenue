@@ -829,7 +829,7 @@ function GridContextMenu({ menu, onClose, onDeleteRows, onAddRow }: {
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  const itemCls = "w-full px-3 py-1.5 text-left text-sm hover:bg-gray-100 transition-colors rounded";
+  const itemCls = "w-full px-3 py-1.5 text-left text-sm hover:bg-blue-50 hover:text-blue-700 transition-colors rounded";
 
   return (
     <div ref={ref}
@@ -850,7 +850,7 @@ function GridContextMenu({ menu, onClose, onDeleteRows, onAddRow }: {
 /* ═══════════════════════════════════════
    Sub-tab: Doanh thu (AG Grid)
    ═══════════════════════════════════════ */
-function GridSubTab({ canWrite, gmvRule, isMobile }: { canWrite: boolean; gmvRule: GmvRuleMeta; isMobile: boolean }) {
+function GridSubTab({ canWrite, gmvRule, isMobile, isManager, onOpenGmvSettings }: { canWrite: boolean; gmvRule: GmvRuleMeta; isMobile: boolean; isManager?: boolean; onOpenGmvSettings?: () => void }) {
   const toast = useToast();
   const gridRef = useRef<AgGridReact>(null);
   const gmvCutoff = useMemo(() => new Date(gmvRule.cutoff_at).getTime(), [gmvRule]);
@@ -1345,22 +1345,12 @@ function GridSubTab({ canWrite, gmvRule, isMobile }: { canWrite: boolean; gmvRul
       <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
         <div className="flex flex-wrap items-center gap-2">
           {canWrite && (
-            <button type="button" onClick={() => setShowAdd(true)} className={cn(btnPrimary, "gap-1.5 text-xs sm:text-sm")}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
-              <span className="hidden sm:inline">Thêm doanh thu</span>
-              <span className="sm:hidden">Thêm</span>
-            </button>
-          )}
-          {canWrite && (
             <button type="button" onClick={() => setShowImport(true)} className={cn(btnSecondary, "text-xs sm:text-sm")}>Import</button>
           )}
           <button type="button" onClick={handleExport} className={cn(btnSecondary, "text-xs sm:text-sm")}>
             <span className="hidden sm:inline">Xuất Excel</span>
             <span className="sm:hidden">Excel</span>
           </button>
-          <div className="hidden flex-1 sm:block" />
           <button type="button" onClick={() => setShowFilters(!showFilters)}
             className={cn(btnSecondary, "text-xs sm:text-sm", showFilters && "bg-gmv-primary/10 text-gmv-primary")}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1368,6 +1358,26 @@ function GridSubTab({ canWrite, gmvRule, isMobile }: { canWrite: boolean; gmvRul
             </svg>
             Lọc{(filterSale || filterChannel || filterPackage || filterDateFrom || filterDateTo) ? " ●" : ""}
           </button>
+          {isManager && onOpenGmvSettings && (
+            <button type="button" onClick={onOpenGmvSettings}
+              className="flex items-center gap-1.5 rounded-gmv-md border border-gmv-border bg-gmv-canvas px-2.5 py-1.5 text-xs font-medium text-gmv-muted hover:bg-gmv-bg hover:text-gmv-text transition">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+              Tỷ giá: {gmvRule.exchange_rate.toLocaleString("vi-VN")}
+            </button>
+          )}
+          <div className="hidden flex-1 sm:block" />
+          {canWrite && (
+            <button type="button" onClick={() => setShowAdd(true)}
+              className="flex items-center gap-1 rounded-gmv-md border border-dashed border-gmv-border px-2.5 py-1.5 text-xs font-medium text-gmv-muted hover:border-gmv-primary hover:text-gmv-primary transition">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              Thêm dòng
+            </button>
+          )}
         </div>
         <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
           placeholder="Tìm uid, tên, sale, kênh, gói..." className={cn(inputCls, "w-full sm:w-56")} />
@@ -2061,25 +2071,12 @@ export default function PaymentsTab() {
             {tab.label}
           </button>
         ))}
-        {isManager && (
-          <>
-            <div className="flex-1" />
-            <button type="button" onClick={() => setShowGmvSettings(true)}
-              className="flex items-center gap-1.5 rounded-gmv-md px-3 py-2 text-xs font-medium text-gmv-muted hover:bg-gmv-bg hover:text-gmv-text transition">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-              </svg>
-              Tỷ giá: {gmvRule.exchange_rate.toLocaleString("vi-VN")}
-            </button>
-          </>
-        )}
       </div>
 
       <div className="min-h-0 flex-1">
         {/* Grid stays mounted (hidden) to preserve state + master data across tab switches */}
         <div className={activeSubTab === "grid" ? "flex h-full flex-col" : "hidden"}>
-          <GridSubTab canWrite={canWrite} gmvRule={gmvRule} isMobile={isMobile} />
+          <GridSubTab canWrite={canWrite} gmvRule={gmvRule} isMobile={isMobile} isManager={isManager} onOpenGmvSettings={() => setShowGmvSettings(true)} />
         </div>
         {activeSubTab === "reports" && <ReportsSubTab />}
         {activeSubTab === "recon" && <ReconSubTab />}
