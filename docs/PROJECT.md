@@ -346,6 +346,10 @@ updated_at    timestamptz
 | 18 | RPC `get_payment_warnings` | 06/09 | Tạo + deploy lên Supabase. Check: DUPLICATE, MISSING_DATA, ORPHAN_DATA, RATE_DEVIATION |
 | 19 | Fix ReconSubTab | 06/09 | Tab Đối soát nội bộ hoạt động — hiển thị UID, ngày, VNĐ, chi tiết warning |
 | 20 | Quick filter Chưa NH / Chưa CRM | 06/09 | Pill buttons trên grid, toggle filter `bank_matched=false` / `crm_activated=false` |
+| 21 | Advanced filters + search mở rộng | 06/09 | Search tìm theo tất cả cột (uid, tên, sale, kênh, gói, payment_seq, note). Dropdown filters: Sale, Kênh, Gói, Date range — server-side |
+| 22 | Fix subtab switching bug | 06/09 | GridSubTab giữ mounted (hidden) khi chuyển tab — không mất data/dropdown |
+| 23 | CurrencyEditor (VNĐ) | 06/09 | Hiện separator (.) lúc gõ số tiền, không phải đợi commit |
+| 24 | Dropdown "Lần TT" | 06/09 | Đổi từ text input sang dropdown `1st`→`10th`, khớp data thực tế trong DB |
 
 ### TODO
 

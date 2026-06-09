@@ -52,7 +52,7 @@ cd frontend && npx tsc --noEmit
 
 ## AG Grid Notes
 - Using **Community** (free) tier — no clipboard, enterprise context menu, or range selection
-- Custom implementations: DatePickerEditor, GridContextMenu, multi-row selection via config
+- Custom implementations: DatePickerEditor, CurrencyEditor, GridContextMenu, multi-row selection via config
 - Worksheet-style UX: single-click edit, dropdown selectors, auto-save on blur
 - 4 pinned (frozen) columns: Ngày, UID, Khách, Sale
 
@@ -67,5 +67,7 @@ cd frontend && npx tsc --noEmit
 - Summary aggregation via Supabase RPC `payments_summary()` (not client-side)
 - Internal reconciliation via RPC `get_payment_warnings()` — checks DUPLICATE, MISSING_DATA, ORPHAN_DATA, RATE_DEVIATION
 - Quick filters on grid: "Chưa khớp NH" (bank_matched=false), "Chưa CRM" (crm_activated=false)
+- Advanced filters: collapsible toolbar with Sale, Kênh, Gói dropdowns + date range — all server-side
+- Search: full-text across uid, tên khách, SĐT, sale, kênh, gói, payment_seq, note, team — server-side
 - Soft delete: `deleted_at` timestamp, filtered out in queries
 - Pagination: 50 rows/page, server-side

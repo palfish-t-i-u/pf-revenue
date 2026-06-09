@@ -353,6 +353,7 @@ def _apply_payment_filters(
     team: str = "",
     channel_id: str = "",
     sale_id: str = "",
+    package_id: str = "",
     status: str = "",
     bank_matched: str = "",
     crm_activated: str = "",
@@ -361,11 +362,25 @@ def _apply_payment_filters(
     q = q.is_("deleted_at", "null")
     if search.strip():
         term = search.strip()
-        parts = [f"uid.ilike.%{term}%", f"note.ilike.%{term}%"]
+        parts = [
+            f"uid.ilike.%{term}%",
+            f"note.ilike.%{term}%",
+            f"payment_seq.ilike.%{term}%",
+            f"team.ilike.%{term}%",
+        ]
         if sb is not None:
             extra_uids = _search_customer_uids(sb, term)
             if extra_uids:
                 parts.append(f"uid.in.({','.join(extra_uids)})")
+            sale_ids = _search_sale_ids(sb, term)
+            if sale_ids:
+                parts.append(f"sale_id.in.({','.join(sale_ids)})")
+            channel_ids = _search_channel_ids(sb, term)
+            if channel_ids:
+                parts.append(f"channel_id.in.({','.join(channel_ids)})")
+            package_ids = _search_package_ids(sb, term)
+            if package_ids:
+                parts.append(f"package_id.in.({','.join(package_ids)})")
         q = q.or_(",".join(parts))
     if date_from:
         q = q.gte("pay_time", f"{date_from.isoformat()}T00:00:00")
@@ -377,6 +392,8 @@ def _apply_payment_filters(
         q = q.eq("channel_id", channel_id.strip())
     if sale_id:
         q = q.eq("sale_id", sale_id.strip())
+    if package_id:
+        q = q.eq("package_id", package_id.strip())
     if status:
         q = q.eq("status", status.strip())
     if bank_matched in ("true", "false"):
@@ -410,6 +427,39 @@ def _search_customer_uids(sb, term: str) -> list[str]:
         .execute()
     )
     return [str(r["uid"]) for r in (res.data or []) if r.get("uid")]
+
+
+def _search_sale_ids(sb, term: str) -> list[str]:
+    res = (
+        sb.table("sales")
+        .select("id")
+        .or_(f"full_name.ilike.%{term}%,short_code.ilike.%{term}%")
+        .limit(20)
+        .execute()
+    )
+    return [str(r["id"]) for r in (res.data or []) if r.get("id")]
+
+
+def _search_channel_ids(sb, term: str) -> list[str]:
+    res = (
+        sb.table("channels")
+        .select("id")
+        .or_(f"name.ilike.%{term}%")
+        .limit(20)
+        .execute()
+    )
+    return [str(r["id"]) for r in (res.data or []) if r.get("id")]
+
+
+def _search_package_ids(sb, term: str) -> list[str]:
+    res = (
+        sb.table("packages")
+        .select("id")
+        .or_(f"name.ilike.%{term}%")
+        .limit(20)
+        .execute()
+    )
+    return [str(r["id"]) for r in (res.data or []) if r.get("id")]
 
 
 class PaymentCreate(BaseModel):
@@ -552,6 +602,7 @@ def register_payment_routes(app, sb_getter) -> None:
         team: str = Query(""),
         channel_id: str = Query(""),
         sale_id: str = Query(""),
+        package_id: str = Query(""),
         status: str = Query(""),
         bank_matched: str = Query(""),
         crm_activated: str = Query(""),
@@ -573,6 +624,7 @@ def register_payment_routes(app, sb_getter) -> None:
             team=team,
             channel_id=channel_id,
             sale_id=sale_id,
+            package_id=package_id,
             status=status,
             bank_matched=bank_matched,
             crm_activated=crm_activated,
@@ -624,6 +676,7 @@ def register_payment_routes(app, sb_getter) -> None:
         team: str = Query(""),
         channel_id: str = Query(""),
         sale_id: str = Query(""),
+        package_id: str = Query(""),
         status: str = Query(""),
         bank_matched: str = Query(""),
         crm_activated: str = Query(""),
@@ -642,6 +695,7 @@ def register_payment_routes(app, sb_getter) -> None:
             team=team,
             channel_id=channel_id,
             sale_id=sale_id,
+            package_id=package_id,
             status=status,
             bank_matched=bank_matched,
             crm_activated=crm_activated,

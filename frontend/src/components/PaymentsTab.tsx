@@ -271,7 +271,7 @@ function AddPaymentDialog({ open, onClose, onSuccess, salesList, channelsList, p
     uid: "", customer_name: "", customer_phone: "",
     pay_time: new Date().toISOString().slice(0, 16),
     package_id: "", sale_id: "", channel_id: "",
-    real_pay_vnd: "", gmv_rmb: "", payment_seq: "1", note: "",
+    real_pay_vnd: "", gmv_rmb: "", payment_seq: "1st", note: "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -287,7 +287,7 @@ function AddPaymentDialog({ open, onClose, onSuccess, salesList, channelsList, p
         uid: "", customer_name: "", customer_phone: "",
         pay_time: new Date().toISOString().slice(0, 16),
         package_id: "", sale_id: "", channel_id: "",
-        real_pay_vnd: "", gmv_rmb: "", payment_seq: "1", note: "",
+        real_pay_vnd: "", gmv_rmb: "", payment_seq: "1st", note: "",
       });
       setError("");
       setCustomerResults([]);
@@ -328,7 +328,7 @@ function AddPaymentDialog({ open, onClose, onSuccess, salesList, channelsList, p
         channel_id: form.channel_id || undefined,
         real_pay_vnd: Number(form.real_pay_vnd),
         gmv_rmb: form.gmv_rmb ? Number(form.gmv_rmb) : undefined,
-        payment_seq: Number(form.payment_seq) || 1,
+        payment_seq: form.payment_seq || "1st",
         note: form.note || undefined,
         customer_name: form.customer_name || undefined,
         customer_phone: form.customer_phone || undefined,
@@ -432,7 +432,7 @@ function AddPaymentDialog({ open, onClose, onSuccess, salesList, channelsList, p
           )}
           <FormField label="Lần TT">
             <select value={form.payment_seq} onChange={(e) => set("payment_seq", e.target.value)} className={inputCls}>
-              {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>Lần {n}</option>)}
+              {["1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th"].map((v) => <option key={v} value={v}>{v}</option>)}
             </select>
           </FormField>
         </div>
@@ -722,6 +722,38 @@ function AddMasterDialog({ open, onClose, masterTab, onSuccess }: {
 /* ═══════════════════════════════════════
    Date picker cell editor
    ═══════════════════════════════════════ */
+const CurrencyEditor = forwardRef((props: any, ref) => {
+  const [raw, setRaw] = useState(() => String(props.value ?? ""));
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const formatted = useMemo(() => {
+    const digits = raw.replace(/\D/g, "");
+    return digits ? Number(digits).toLocaleString("vi-VN") : "";
+  }, [raw]);
+
+  useImperativeHandle(ref, () => ({
+    getValue: () => {
+      const digits = raw.replace(/\D/g, "");
+      return digits ? Number(digits) : props.value;
+    },
+    isCancelAfterEnd: () => false,
+    afterGuiAttached: () => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    },
+  }));
+
+  return (
+    <input ref={inputRef} type="text" value={formatted}
+      onChange={(e) => setRaw(e.target.value.replace(/\D/g, ""))}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") props.stopEditing();
+        if (e.key === "Enter") props.stopEditing();
+      }}
+      style={{ width: "100%", height: "100%", border: "none", outline: "none", background: "transparent", fontSize: "inherit", fontFamily: "inherit", textAlign: "right" }} />
+  );
+});
+
 const DatePickerEditor = forwardRef((props: any, ref) => {
   const raw = props.data?.pay_time;
   const [value, setValue] = useState(() => {
@@ -811,6 +843,12 @@ function GridSubTab({ canWrite, gmvRule }: { canWrite: boolean; gmvRule: GmvRule
   const [teamFilter, setTeamFilter] = useState("Tất cả");
   const [quickFilter, setQuickFilter] = useState<"" | "unmatched_bank" | "uncrm">("");
   const [search, setSearch] = useState("");
+  const [filterSale, setFilterSale] = useState("");
+  const [filterChannel, setFilterChannel] = useState("");
+  const [filterPackage, setFilterPackage] = useState("");
+  const [filterDateFrom, setFilterDateFrom] = useState("");
+  const [filterDateTo, setFilterDateTo] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<Payment[]>([]);
   const [summary, setSummary] = useState<any>({});
@@ -850,6 +888,11 @@ function GridSubTab({ canWrite, gmvRule }: { canWrite: boolean; gmvRule: GmvRule
       if (search.trim()) params.search = search.trim();
       if (quickFilter === "unmatched_bank") params.bank_matched = "false";
       if (quickFilter === "uncrm") params.crm_activated = "false";
+      if (filterSale) params.sale_id = filterSale;
+      if (filterChannel) params.channel_id = filterChannel;
+      if (filterPackage) params.package_id = filterPackage;
+      if (filterDateFrom) params.from = filterDateFrom;
+      if (filterDateTo) params.to = filterDateTo;
       const res = await api.get("/api/v1/payments", { params });
       setItems(res.data.items || []);
       setTotal(res.data.total || 0);
@@ -859,10 +902,10 @@ function GridSubTab({ canWrite, gmvRule }: { canWrite: boolean; gmvRule: GmvRule
     } finally {
       setLoading(false);
     }
-  }, [teamFilter, quickFilter, search, page]);
+  }, [teamFilter, quickFilter, search, filterSale, filterChannel, filterPackage, filterDateFrom, filterDateTo, page]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-  useEffect(() => { setPage(1); }, [teamFilter, quickFilter, search]);
+  useEffect(() => { setPage(1); }, [teamFilter, quickFilter, search, filterSale, filterChannel, filterPackage, filterDateFrom, filterDateTo]);
   // Reset pending delete when data reloads (page/filter change)
   useEffect(() => { setDeletePending(null); }, [items]);
 
@@ -943,7 +986,8 @@ function GridSubTab({ canWrite, gmvRule }: { canWrite: boolean; gmvRule: GmvRule
       cellEditorParams: { values: packageNames },
     },
     { field: "real_pay_vnd", headerName: "VNĐ", width: 130, type: "numericColumn",
-      valueFormatter: (p: any) => fmtVND(p.value ?? 0), editable: canWrite },
+      valueFormatter: (p: any) => fmtVND(p.value ?? 0), editable: canWrite,
+      cellEditor: CurrencyEditor },
     { field: "gmv_final", headerName: "GMV", width: 110, type: "numericColumn",
       valueFormatter: (p: any) => fmtGMV(p.value ?? 0),
       editable: (params: any) => {
@@ -953,7 +997,10 @@ function GridSubTab({ canWrite, gmvRule }: { canWrite: boolean; gmvRule: GmvRule
         return new Date(payTime).getTime() < gmvCutoff;
       },
     },
-    { field: "payment_seq", headerName: "Lần", width: 60, editable: canWrite },
+    { field: "payment_seq", headerName: "Lần", width: 70, editable: canWrite,
+      cellEditor: "agSelectCellEditor",
+      cellEditorParams: { values: ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th"] },
+    },
     { field: "status", headerName: "TT", width: 80,
       cellRenderer: (p: any) => <StatusBadge status={p.value} />,
       editable: false },
@@ -1232,9 +1279,61 @@ function GridSubTab({ canWrite, gmvRule }: { canWrite: boolean; gmvRule: GmvRule
         )}
         <button type="button" onClick={handleExport} className={btnSecondary}>Xuất Excel</button>
         <div className="flex-1" />
+        <button type="button" onClick={() => setShowFilters(!showFilters)}
+          className={cn(btnSecondary, showFilters && "bg-gmv-primary/10 text-gmv-primary")}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+          </svg>
+          Lọc{(filterSale || filterChannel || filterPackage || filterDateFrom || filterDateTo) ? " ●" : ""}
+        </button>
         <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
-          placeholder="Tìm uid, tên, SĐT..." className={cn(inputCls, "w-56")} />
+          placeholder="Tìm uid, tên, sale, kênh, gói..." className={cn(inputCls, "w-56")} />
       </div>
+
+      {/* Advanced filters row */}
+      {showFilters && (
+        <div className="mb-2 flex flex-wrap items-end gap-2 rounded-gmv-lg border border-gmv-border bg-gmv-bg/50 px-3 py-2">
+          <div className="flex flex-col gap-0.5">
+            <label className="text-[11px] font-medium text-gmv-muted">Từ ngày</label>
+            <input type="date" value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)}
+              className={cn(inputCls, "w-36 text-xs")} />
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <label className="text-[11px] font-medium text-gmv-muted">Đến ngày</label>
+            <input type="date" value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)}
+              className={cn(inputCls, "w-36 text-xs")} />
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <label className="text-[11px] font-medium text-gmv-muted">Sale</label>
+            <select value={filterSale} onChange={(e) => setFilterSale(e.target.value)}
+              className={cn(inputCls, "w-36 text-xs")}>
+              <option value="">Tất cả</option>
+              {salesList.map((s: any) => <option key={s.id} value={s.id}>{s.short_code || s.full_name}</option>)}
+            </select>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <label className="text-[11px] font-medium text-gmv-muted">Kênh</label>
+            <select value={filterChannel} onChange={(e) => setFilterChannel(e.target.value)}
+              className={cn(inputCls, "w-36 text-xs")}>
+              <option value="">Tất cả</option>
+              {channelsList.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <label className="text-[11px] font-medium text-gmv-muted">Gói</label>
+            <select value={filterPackage} onChange={(e) => setFilterPackage(e.target.value)}
+              className={cn(inputCls, "w-44 text-xs")}>
+              <option value="">Tất cả</option>
+              {packagesList.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+          <button type="button"
+            onClick={() => { setFilterSale(""); setFilterChannel(""); setFilterPackage(""); setFilterDateFrom(""); setFilterDateTo(""); }}
+            className="self-end pb-1 text-xs text-gmv-muted hover:text-gmv-text">
+            Xóa lọc
+          </button>
+        </div>
+      )}
 
       {/* Team filter tabs + quick filters */}
       <div className="mb-1 flex items-center gap-1 border-b border-gmv-border">
@@ -1812,7 +1911,10 @@ export default function PaymentsTab() {
       </div>
 
       <div className="min-h-0 flex-1">
-        {activeSubTab === "grid" && <GridSubTab canWrite={canWrite} gmvRule={gmvRule} />}
+        {/* Grid stays mounted (hidden) to preserve state + master data across tab switches */}
+        <div className={activeSubTab === "grid" ? "flex h-full flex-col" : "hidden"}>
+          <GridSubTab canWrite={canWrite} gmvRule={gmvRule} />
+        </div>
         {activeSubTab === "reports" && <ReportsSubTab />}
         {activeSubTab === "recon" && <ReconSubTab />}
         {activeSubTab === "master" && <MasterSubTab canWrite={canWrite} />}
