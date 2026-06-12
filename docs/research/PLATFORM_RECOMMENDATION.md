@@ -1,5 +1,5 @@
 # Báo cáo Đề xuất Nền tảng Quản lý Doanh thu (Platform Recommendation)
-> **Dự án**: PalFish GMV Reconciliation Automation
+> **Dự án**: pf-revenue — App Quản lý Doanh thu (PalFish)
 > **Tác giả**: Đạt 
 > **Ngày thực hiện**: 12/06/2026
 > **Bối cảnh**: Phân tích sơ bộ năng lực đáp ứng của các nền tảng đã qua bộ lọc sơ bộ trên 13 kịch bản nghiệp vụ cốt lõi. Báo cáo này so sánh điểm số chi tiết, nêu rõ ưu/nhược điểm kỹ thuật và đề xuất lộ trình chạy thử nghiệm thực tế (POC) tiếp theo cho anh Hiếu duyệt.
@@ -15,7 +15,7 @@
 
 Dưới đây là bảng đánh giá dự kiến điểm số của các nền tảng dựa trên mẫu bảng so sánh và trọng số đã thống nhất tại mục 7 tài liệu handoff:
 
-| Tiêu chí (trọng số) | Lark Base | Airtable | Teable (trên Supabase) | Grist (Self-host) | SeaTable (Self-host) | Google Sheets (baseline) |
+| Tiêu chí (trọng số) | Lark Base | Airtable | Teable (trên Supabase) | Grist (Self-host) | SeaTable (tham khảo) | Google Sheets (baseline) |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
 | **UX worksheet W1–W10 (25%)** | 9.5 | 9.5 | 9.0 | 8.0 | 9.0 | 10.0 |
 | **Phân quyền (20%)** | 9.5 | 5.0 | 9.0 | 10.0 | 7.5 | 2.0 |
@@ -25,8 +25,10 @@ Dưới đây là bảng đánh giá dự kiến điểm số của các nền t
 | **Hiệu năng + migrate 15K dòng (10%)** | 9.5 | 9.5 | 9.0 | 9.0 | 8.5 | 6.0 |
 | **Chi phí/năm — 10 editor + 40 viewer (5%)**| 9.0 | 6.0 | 10.0 | 10.0 | 4.0 | 10.0 |
 | **API, tiếng Việt, mobile (5%)** | 9.5 | 9.5 | 8.0 | 7.5 | 8.0 | 9.0 |
-| **Tổng** | **9.10** | **7.95** | **8.70** | **9.18** | **8.25** | **7.43** |
+| **Tổng** | **9.10** | **7.95** | **8.70** | **9.18** | **8.25** | **7.25** |
 | **Hard gate fail?** | Không | Có | Không (Pass tạm thời) | Không | Không | Có |
+
+*SeaTable chỉ để tham khảo trong bảng điểm — đã loại khỏi POC vòng 1 do tỷ lệ cost-value thấp (xem PLATFORM_COMPARISON.md, mục 2).*
 
 
 
@@ -128,7 +130,7 @@ Mỗi nền tảng (Lark, Grist, Teable) sẽ được ép chạy qua 13 bài te
 | **UX/UI** | 2 | Dựng Grid: Freeze 4 cột, dropdown Kênh/Gói, Date picker. | Giao diện gọn gàng, fit màn hình. | - Link demo sản phẩm.<br>- Ảnh chụp màn hình giao diện grid. |
 | | 3 | Trải nghiệm W1-W10 (Đặc biệt: W5 Bulk edit, W6 Data validation). | Inline edit mượt, Paste khối từ Excel chuẩn xác. | - Video quay màn hình thao tác inline edit và bulk edit 10 dòng đồng thời.<br>- Video paste block 50 dòng từ Excel. |
 | | 4 | Bộ lọc: Quick filter Chưa khớp NH/CRM, Search toàn văn, Lưu View cứng. | Khớp với logic filter của app pf-revenue hiện tại. | - Ảnh chụp kết quả filter 1 chạm và kết quả tìm kiếm đa trường. |
-| **Bảo mật** | 6 | Giả lập 4 Role: Sale (thấy team), Manager (thấy team mình), Leader/Sale (team + khối), System. | RLS hoạt động triệt để ở cấp DB, ẩn được cột GMV với Sale. | - **Ảnh chụp màn hình/Video giao diện đăng nhập của 3 role khác nhau** hiển thị số lượng dòng và cột khác nhau dựa trên RLS. |
+| **Bảo mật** | 6 | Giả lập các role mẫu: 1 user thấy team + khối mình, 1 manager thấy team mình, 1 system thấy tất cả, 1 user chỉ xem (read-only). *Lưu ý: ma trận quyền hiện tại kế thừa từ GMV và CHƯA chốt cứng (user thực là ops/kế toán/sale từ leader trở lên, sẽ còn thay đổi) — trọng tâm test là CƠ CHẾ phân quyền: tạo rule theo dòng/cột được, và sửa lại cấu hình dễ dàng khi nhu cầu đổi.* | RLS hoạt động triệt để ở cấp DB, ẩn được cột GMV với role thấp; đổi scope của 1 role không phải dựng lại từ đầu. | - **Ảnh chụp màn hình/Video giao diện đăng nhập của các role khác nhau** hiển thị số lượng dòng và cột khác nhau dựa trên RLS.<br>- Video thao tác sửa 1 rule quyền và kết quả áp dụng ngay. |
 | | 9 | Test Conflict: 2-3 users cùng sửa một dòng/bảng. | Không bị ghi đè, hiển thị realtime. | - Video quay màn hình 2 trình duyệt đồng thời cập nhật dữ liệu realtime. |
 | | 10 | Audit Log: Kiểm tra lịch sử chỉnh sửa từng ô. | Ghi nhận đúng User, Thời gian, Giá trị cũ/mới. | - Ảnh chụp bảng ghi lịch sử chỉnh sửa (audit history/cell history) của một ô dữ liệu. |
 | **Vận hành** | 7 | Dựng Dashboard: BCTB Pivot, Tổng hợp Team/Kênh. | UI trực quan, Share link cho sếp (Read-only) ổn định. | - Ảnh chụp dashboard báo cáo.<br>- Link share read-only dùng thử. |

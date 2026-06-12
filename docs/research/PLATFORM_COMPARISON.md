@@ -1,5 +1,5 @@
 # Báo cáo Khảo sát & So sánh các Nền tảng Quản lý Doanh thu
-> **Dự án**: PalFish GMV Reconciliation Automation
+> **Dự án**: pf-revenue — App Quản lý Doanh thu (PalFish)
 > **Tác giả**: Đạt 
 > **Ngày thực hiện**: 12/06/2026
 > **Bối cảnh**: Khảo sát và đánh giá sơ bộ các giải pháp phần mềm/nền tảng bên ngoài để thay thế hoặc bổ trợ cho ứng dụng tự phát triển (`pf-revenue`). Mục tiêu là tìm kiếm một công cụ có thể giữ nguyên trải nghiệm nhập liệu (Worksheet UX) tiện lợi như Google Sheets nhưng giải quyết triệt để vấn đề về phân quyền dòng/cột (RLS), tính toàn vẹn dữ liệu (Data Integrity) và khả năng mở rộng.
@@ -25,7 +25,7 @@
 
 | Nhóm | Nền tảng | Gate 1 (RLS) | Gate 2 (UX) | Gate 3 (Cap) | Gate 4 (Form) | Gate 5 (IO) | Gate 6 (Mig) | Gate 7 (Filt) | Kết quả sơ bộ | Lý do loại chính / Ghi chú |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
-| **SaaS / All-in-One** | **Lark Base** | ✅ Pass | ✅ Pass | ✅ Pass | ✅ Pass | ✅ Pass | ✅ Pass | ✅ Pass | **ĐI TIẾP (Top SaaS)** | Phân quyền dòng trực quan ở cấp Base; UX bảng mượt. Mức độ tự động map linked records khi migrate cần xác minh bằng POC thực tế. |
+| **SaaS / All-in-One** | **Lark Base** | ✅ Pass | ✅ Pass | ⚠️ Warn | ✅ Pass | ✅ Pass | ✅ Pass | ✅ Pass | **ĐI TIẾP (Top SaaS)** | Phân quyền dòng trực quan ở cấp Base; UX bảng mượt. ⚠️ Gate 3: limit records/table theo tài liệu là 20K–50K tùy plan — POC phải xác minh plan nào đủ 50K–100K. Mức độ tự động map linked records khi migrate cũng cần xác minh bằng POC thực tế. |
 | | **Airtable** | ⚠️ Warn | ✅ Pass | ✅ Pass | ✅ Pass | ✅ Pass | ✅ Pass | ✅ Pass | **LOẠI (Hoặc Enterprise)** | Có Interface permissions, Record visibility, Enterprise controls nhưng không mạnh bằng Grist/Teable ở cấp DB. Các gói thông thường không hỗ trợ DB-level RLS thực thụ (chỉ giới hạn ở UI). Gói Enterprise hỗ trợ đầy đủ nhưng chi phí rất đắt đỏ. |
 | | **Grist** | ✅ Pass | ✅ Pass | ✅ Pass | ✅ Pass | ✅ Pass | ✅ Pass | ✅ Pass | **ĐI TIẾP (Top Self-host)** | Phân quyền bằng công thức Python cực mạnh và linh hoạt ở cấp DB. Trực quan hóa dữ liệu tốt. Hoàn toàn miễn phí khi tự host. |
 | | **SeaTable** | ⚠️ Warn | ✅ Pass | ✅ Pass | ✅ Pass | ✅ Pass | ✅ Pass | ✅ Pass | **KHÔNG ƯU TIÊN** | Không ưu tiên / loại khỏi POC vòng 1 do tỷ lệ cost-value thấp (bản Developer giới hạn 3 user, bản Enterprise self-host cho 50 users có phí rất cao ~199 triệu VNĐ/năm). |
