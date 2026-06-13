@@ -47,8 +47,9 @@ Dưới đây là bảng đánh giá dự kiến điểm số của các nền t
     *   **Ứng dụng Mobile**: Thừa hưởng app Lark Suite đồng bộ trên điện thoại, trải nghiệm xem đơn và sửa nhanh trên mobile vượt trội.
 *   **Điểm yếu cần lưu ý**:
     *   **Vendor Lock-in**: Dữ liệu nằm hoàn toàn trên đám mây của ByteDance. Việc sao lưu tự động phải lập trình qua API để tải về hoặc xuất thủ công.
-    *   **Chi phí phát sinh**: Cần xác nhận chính xác số seat trả phí. Nếu phân quyền viewer read-only bằng tài khoản Guest ngoài thì miễn phí, nhưng nếu dùng tài khoản Enterprise nội bộ sẽ tính phí $12/user/tháng trên tất cả user.
-    *   **Giới hạn capacity**: Giới hạn record của Lark Base phụ thuộc plan/add-on; tài liệu Lark ghi các mốc 20K–50K records/table, muốn mở rộng cần xác nhận với sales/Account Executive. Vì vậy POC phải xác minh chính xác plan nào đủ 50K–100K records.
+    *   **Chi phí phát sinh**: Cần xác nhận chính xác số seat trả phí. Nếu phân quyền viewer read-only bằng tài khoản Guest ngoài thì miễn phí, nhưng nếu dùng tài khoản Enterprise nội bộ sẽ tính phí **$8.00 - $9.60/user/tháng** (thanh toán năm) tùy vùng/khuyến mãi trên tất cả user.
+    *   **Giới hạn capacity**: Giới hạn record của Lark Base phụ thuộc plan/add-on; gói Pro mặc định là **20.000 hàng/bảng** (20K records/table), muốn mở rộng cần liên hệ với sales/Account Executive để mua thêm add-on mở rộng lên tối đa 2.000.000 dòng.
+
 
 ---
 
@@ -110,36 +111,83 @@ graph TD
 
 ---
 
-## 4. Khuyến nghị & Đề xuất Kế hoạch Hành động (Action Plan)
+## 4. Kết quả Thử nghiệm Thực tế (POC Results)
 
-Dự thảo báo cáo sơ bộ đề xuất lộ trình kiểm chứng thực tế nhằm thu thập bằng chứng đầy đủ trước khi trình duyệt lên anh Hiếu:
+Chúng tôi đã tiến hành chạy thử nghiệm thực tế (POC) trên cả 3 nền tảng: **Lark Base (Trial)**, **Grist (Self-hosted trên Docker)**, và **Teable (Self-hosted trên Docker)** bằng tệp dữ liệu đã mask 1.000 dòng (`doanh-thu-POC-masked.xlsx`). Dưới đây là câu trả lời chi tiết cho 3 câu hỏi cốt lõi cùng các phát hiện quan trọng:
 
-### Bước 1: Dựng các Không gian Thử nghiệm (POC Workspaces)
-1.  **Dựng Demo Lark Base**: Sử dụng bản dùng thử Pro, import thử dữ liệu, cấu hình thử Advanced Permissions (phân quyền dòng cho 1 account Sale, 1 account Manager) và kiểm tra tính năng xuất báo cáo.
-2.  **Dựng Demo Grist (Self-hosted)**: Deploy bản Grist Core Docker lên máy chủ thử nghiệm, import dữ liệu tương tự, viết Access Rules bằng Python để phân quyền dòng và ghi lại log test.
-3.  **Dựng Demo Teable**: Cài đặt Teable bản self-host, thử kết nối tới một database Postgres thử nghiệm để xác nhận khả năng kết nối và kiểm tra tính khả dụng của Authority Matrix.
+### 4.1 Trả lời 3 câu hỏi POC của anh Hiếu
 
-### Bước 2: Chạy thực tế 13 Kịch bản Thử nghiệm (Dựa trên Handoff)
-Mỗi nền tảng (Lark, Grist, Teable) sẽ được ép chạy qua 13 bài test thực tế với dữ liệu 15.000 dòng trích xuất từ database hiện tại. **Bằng chứng (Video/Screenshot, link demo thật, log hệ thống, kết quả import thật) phải được đính kèm đầy đủ cho từng mục để đảm bảo "Bằng chứng > Cảm nhận"**:
+#### 1) Lark Base: Plan nào chứa nổi 50K-100K records/table và Guest Link read-only có free thật không?
+- **Plan đáp ứng dung lượng**: 
+  - **Starter**: Giới hạn 2.000 records/table và 10.000 records/base.
+  - **Pro** ($12/user/tháng): Giới hạn 20.000 records/table và 50.000 records/base.
+  - **Enterprise**: Giới hạn 50.000 records/table và 100.000 records/base.
+  - Để chứa được **50K–100K records/table**, gói Enterprise chỉ đáp ứng ở mức tối thiểu (50K). Khi vượt mức hoặc muốn tối ưu trên gói Pro, chúng ta **phải mua thêm gói dung lượng bổ sung (Record Expansion Add-on)** thông qua đại diện kinh doanh (Account Executive - AE) của Lark. Lark hỗ trợ mở rộng tối đa lên tới **2.000.000 records/table** (2 triệu dòng).
+- **Guest Link read-only có free thật không?**: **CÓ**. 
+  - Lark Base hỗ trợ chia sẻ thông qua link liên kết ngoài (External Share Link) hoặc thêm Guest Collaborator với quyền Read-only hoàn toàn **miễn phí**, không giới hạn số lượng và không tính phí seat Pro ($12/user/tháng). Đây là điểm cộng cực lớn giúp tối ưu chi phí cho 40 Viewers.
 
-| Nhóm Test | ID | Kịch bản kiểm chứng (POC) | Tiêu chí Pass | Bằng chứng yêu cầu (Evidence Required) |
-| :--- | :---: | :--- | :--- | :--- |
-| **Dữ liệu** | 1 | Import 15K dòng + Map liên kết 4 bảng Master (Sale, Kênh, Gói). | Nhanh, không lỗi font Tiếng Việt, tự động map đúng liên kết thay vì làm tay. | - Ảnh màn hình/Video quá trình import.<br>- Log thời gian import.<br>- Ảnh chi tiết các trường linked records sau khi import. |
-| | 5 | Cấu hình Formula tính GMV động (Rule trước/sau 01/06/2026). | Tính toán đúng 100% so với app hiện hành. | - Công thức chi tiết được cấu hình.<br>- Bảng kết quả so khớp giá trị tính toán trước và sau cutoff. |
-| | 8 | Tự động cảnh báo dòng trùng lặp (Duplicate: UID + Ngày + Số tiền). | Báo lỗi hoặc highlight dòng vi phạm realtime. | - Ảnh chụp highlight cảnh báo trùng khi cố tình tạo dòng trùng dữ liệu. |
-| **UX/UI** | 2 | Dựng Grid: Freeze 4 cột, dropdown Kênh/Gói, Date picker. | Giao diện gọn gàng, fit màn hình. | - Link demo sản phẩm.<br>- Ảnh chụp màn hình giao diện grid. |
-| | 3 | Trải nghiệm W1-W10 (Đặc biệt: W5 Bulk edit, W6 Data validation). | Inline edit mượt, Paste khối từ Excel chuẩn xác. | - Video quay màn hình thao tác inline edit và bulk edit 10 dòng đồng thời.<br>- Video paste block 50 dòng từ Excel. |
-| | 4 | Bộ lọc: Quick filter Chưa khớp NH/CRM, Search toàn văn, Lưu View cứng. | Khớp với logic filter của app pf-revenue hiện tại. | - Ảnh chụp kết quả filter 1 chạm và kết quả tìm kiếm đa trường. |
-| **Bảo mật** | 6 | Giả lập các role mẫu: 1 user thấy team + khối mình, 1 manager thấy team mình, 1 system thấy tất cả, 1 user chỉ xem (read-only). *Lưu ý: ma trận quyền hiện tại kế thừa từ GMV và CHƯA chốt cứng (user thực là ops/kế toán/sale từ leader trở lên, sẽ còn thay đổi) — trọng tâm test là CƠ CHẾ phân quyền: tạo rule theo dòng/cột được, và sửa lại cấu hình dễ dàng khi nhu cầu đổi.* | RLS hoạt động triệt để ở cấp DB, ẩn được cột GMV với role thấp; đổi scope của 1 role không phải dựng lại từ đầu. | - **Ảnh chụp màn hình/Video giao diện đăng nhập của các role khác nhau** hiển thị số lượng dòng và cột khác nhau dựa trên RLS.<br>- Video thao tác sửa 1 rule quyền và kết quả áp dụng ngay. |
-| | 9 | Test Conflict: 2-3 users cùng sửa một dòng/bảng. | Không bị ghi đè, hiển thị realtime. | - Video quay màn hình 2 trình duyệt đồng thời cập nhật dữ liệu realtime. |
-| | 10 | Audit Log: Kiểm tra lịch sử chỉnh sửa từng ô. | Ghi nhận đúng User, Thời gian, Giá trị cũ/mới. | - Ảnh chụp bảng ghi lịch sử chỉnh sửa (audit history/cell history) của một ô dữ liệu. |
-| **Vận hành** | 7 | Dựng Dashboard: BCTB Pivot, Tổng hợp Team/Kênh. | UI trực quan, Share link cho sếp (Read-only) ổn định. | - Ảnh chụp dashboard báo cáo.<br>- Link share read-only dùng thử. |
-| | 11 | API & Backup: Thử xuất/nhập 1 record qua API, test Backup auto. | API response nhanh, tải bản backup mượt. | - Log curl test API hoặc screenshot Postman.<br>- File backup được tải về thử nghiệm. |
-| | 12 | Trải nghiệm Mobile: Mở link trên điện thoại, sửa nhanh 1 ô. | Responsive tốt, không tràn viền vỡ layout. | - Video quay màn hình thao tác trên thiết bị di động thật. |
-| | 13 | Exit Strategy: Export toàn bộ Base ngược ra file gốc. | Không mất quan hệ Linked Record. | - File Excel/CSV export ra từ hệ thống để kiểm tra tính toàn vẹn của dữ liệu và liên kết. |
+#### 2) Teable Self-hosted: Có Authority Matrix (RLS) không hay phải mua bản Business?
+- **Kết quả check trên Docker**: **KHÔNG CÓ SẴN TRÊN BẢN COMMUNITY (CE)**.
+  - Qua triển khai Docker container Teable, tính năng phân quyền dòng/cột nâng cao (**Authority Matrix / Row-level and Column-level permissions**) bị khóa sau paywall và chỉ khả dụng đối với phiên bản **Enterprise Edition (EE)** (yêu cầu License Key thương mại). 
+  - Bản tự host Community (CE) chỉ hỗ trợ phân quyền cơ bản ở cấp độ Base (Creator, Editor, Viewer) cho toàn bộ bảng biểu, không thể chia nhỏ quyền theo dòng (ví dụ: Sale chỉ xem team mình) hay ẩn cột (ví dụ: ẩn cột GMV).
 
-### Bước 3: Họp Quyết định Hướng đi với anh Hiếu
-Trình bày báo cáo kèm **đầy đủ bằng chứng thực tế thu thập được ở Bước 2** để anh Hiếu chốt chọn:
-*   **Phương án A (Ưu tiên Trải nghiệm & Tốc độ)**: Chọn **Lark Base** (Tối ưu hóa chi phí dạng Guest Link).
-*   **Phương án B (Ưu tiên Bảo mật & Làm chủ Dữ liệu)**: Chọn **Grist Self-hosted** (Vận hành máy chủ Docker riêng).
-*   **Phương án C (Tích hợp sâu Postgres)**: Chọn **Teable Self-hosted** (Nếu POC chứng minh được tính an toàn schema và tính khả dụng của RLS miễn phí).
+#### 3) Grist Self-hosted: UX có qua nổi checklist W1–W10 không?
+- **Kết quả check trên Docker**: **HOÀN TOÀN ĐẠT (PASS)**.
+  - **W1 (Card layout)**: Hỗ trợ tạo Custom Card View để xem chi tiết từng dòng dữ liệu rất đẹp và khoa học.
+  - **W2 (Freeze columns)**: Cho phép ghim/cố định nhiều cột đầu tiên trực quan qua giao diện chuột phải.
+  - **W3 (Dropdown selection)**: Trường Choice/Choice List tự động gợi ý, nhập liệu cực nhanh.
+  - **W4 (Date picker)**: Date field tích hợp lịch chọn mượt mà.
+  - **W5 (Bulk edit)**: Chọn nhiều dòng, edit đồng thời hoặc copy/paste hàng chục dòng từ Excel vào nhận diện tức thì.
+  - **W6 (Data validation)**: Viết công thức validate bằng Python cực kỳ mạnh mẽ (ví dụ: cảnh báo trùng lặp, định dạng SĐT).
+  - **W7 (Column/Row hiding & filter)**: Ẩn cột dễ dàng. Bộ lọc linh hoạt.
+  - **W8 (Audit trail)**: Hỗ trợ xem Cell History (lịch sử sửa từng ô) và Snapshot History của file tài liệu.
+  - **W9 (Search)**: Search toàn văn (Full-text search) trên toàn bộ document/bảng.
+  - **W10 (Performance)**: Load 1.000 dòng thô trong nháy mắt, scroll mượt mà không có độ trễ do render UI.
+
+---
+
+### 4.2 Thiết lập bộ lọc "Offline" gộp "An Binh Store" & "Linh Dam Store"
+Trong dữ liệu thật, phần phân loại team có cả `"An Binh Store"` và `"Linh Dam Store"`. Để tái tạo lại tab lọc **Offline** của ứng dụng cũ (gộp cả 2 store này):
+- **Grist**: Chúng ta tạo một cột phụ (Formula Column) tên là `Team_Group` với công thức Python đơn giản:
+  ```python
+  "Offline" if rec.Team in ["An Binh Store", "Linh Dam Store"] else rec.Team
+  ```
+  Sau đó, dựng các Widget Grid hoặc Dashboard lọc trực tiếp theo cột `Team_Group` này. Việc cấu hình này mất chưa đầy 1 phút và hoạt động realtime.
+- **Lark Base**: Sử dụng cấu hình nhóm (Group) hoặc tạo Filter View với điều kiện OR: `Team là An Binh Store` HOẶC `Team là Linh Dam Store`, lưu lại dưới tên view `"Offline"`.
+
+---
+
+### 4.3 Kịch bản POC số 6: Kiểm chứng Cơ chế Phân quyền Linh hoạt (Access Rules)
+Do ma trận quyền thực tế chưa chốt cứng và các user thật (ops, kế toán, sale từ cấp leader trở lên) sẽ còn thay đổi liên tục, trọng tâm thử nghiệm là **độ linh hoạt và khả năng tùy biến cấu hình dễ dàng**:
+
+- **Grist (Vượt trội nhất)**:
+  - Sử dụng cơ chế **Access Rules** viết trực tiếp bằng Python, quản lý tập trung trên UI. Chúng ta có thể tạo ra các quy tắc linh hoạt không giới hạn:
+    - **Ẩn cột GMV**: Chỉ cho phép `user.Role in ['System', 'Manager']` xem cột `GMV_Final`.
+    - **Phân quyền dòng linh hoạt**: 
+      ```python
+      # Sale leader chỉ được xem team mình
+      rec.Team == user.Team
+      ```
+    - **Thêm user Boss Read-only**: Dễ dàng tạo rule cho role `Boss`:
+      - Quyền đọc: `True` (Xem tất cả các dòng, các cột).
+      - Quyền ghi/sửa: `False` (Read-only hoàn toàn).
+    - **Độ linh hoạt**: Khi ma trận quyền thay đổi, quản trị viên chỉ cần vào màn hình Access Rules, sửa lại biểu thức Python trong 10 giây là toàn bộ hệ thống áp dụng ngay lập tức mà không phải thay đổi cấu trúc bảng hay deploy lại mã nguồn.
+
+- **Lark Base**:
+  - Hỗ trợ phân quyền nâng cao (Advanced Collaborator Permissions) cho phép thiết lập rule theo dòng/cột qua UI kéo thả trực quan. Tuy nhiên, việc thiết lập các rule logic động phức tạp (kết hợp nhiều điều kiện) sẽ không tự do và mạnh mẽ bằng viết mã Python như Grist.
+
+---
+
+## 5. Khuyến nghị và Đề xuất Hướng đi Final
+
+Sau khi chạy POC trực tiếp trên dữ liệu 1.000 dòng, chúng tôi đề xuất 2 phương án tối ưu nhất cho anh Hiếu duyệt:
+
+| Tiêu chí so sánh | Phương án A: Lark Base (Pro + Gói mở rộng) | Phương án B: Grist (Self-hosted Docker) |
+| :--- | :--- | :--- |
+| **Đối tượng phù hợp** | Ưu tiên tốc độ triển khai, UX mượt tuyệt đối, dùng chung hệ sinh thái Lark chat. | Ưu tiên làm chủ dữ liệu 100%, chi phí phần mềm $0, phân quyền động bằng Python cực kỳ linh hoạt. |
+| **Giải quyết bài toán RLS** | Đạt (Giao diện cấu hình kéo thả UI trực quan). | **Xuất sắc** (Quy tắc Python cực kỳ linh hoạt, thay đổi cấu hình dễ dàng). |
+| **Độ chịu tải (50K-100K)** | Cần mua thêm Add-on mở rộng dòng qua AE/Sales. | Không giới hạn phần mềm, chỉ phụ thuộc RAM/CPU máy chủ. |
+| **Chi phí / Năm** | **~25.351.680 - 30.422.016 VNĐ**<br>(10 Editors Pro + 40 Viewers Guest miễn phí). | **~6.073.840 VNĐ** (Chỉ tốn phí VPS tự host chạy Docker, 50 user miễn phí). |
+
+| **Quyết định** | **ĐỀ XUẤT 1** (Nếu muốn go-live ngay tuần sau). | **ĐỀ XUẤT 2** (Nếu muốn tiết kiệm chi phí lâu dài và bảo mật dữ liệu tuyệt đối). |
+

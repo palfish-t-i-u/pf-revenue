@@ -47,17 +47,17 @@ Kịch bản tính toán: **10 Editors (nhập liệu, kế toán, ops) + 40 Vie
 
 ### 3.1 Bảng Tổng Hợp Chi Phí 13 Nền Tảng
 
-| Nền tảng | Gói dịch vụ đề xuất | Cách tính phí (Seat Model) | Chi phí Cloud / Năm ($) | Chi phí Cloud / Năm (VNĐ) | Chi phí Self-host / Năm (VNĐ) | Giới hạn bản ghi (Records Limit) |
+| Nền tảng | Gói dịch vụ đề xuất | Cách tính phí (Seat Model) | Chi phí Cloud / Năm ($ hoặc €) | Chi phí Cloud / Năm (VNĐ) | Chi phí Self-host / Năm (VNĐ) | Giới hạn bản ghi (Records Limit) |
 | :--- | :--- | :--- | :---: | :---: | :---: | :--- |
-| **Lark Base** | Pro Plan | Tính trên member (Viewer Guest miễn phí) | $1,440 (10 seats Pro)<br>hoặc $7,200 (50 seats) | **38,027,520 VNĐ**<br>hoặc **190,137,600 VNĐ** | N/A (Chỉ chạy Cloud SaaS) | Giới hạn phụ thuộc plan/add-on<br>(20K–50K records/table,<br>cần AE để expand) |
+| **Lark Base** | Pro Plan | Tính trên member (Viewer Guest miễn phí) | $960 - $1,152 (10 seats Pro)<br>hoặc $4,800 - $5,760 (50 seats) | **25.351.680 - 30.422.016 VNĐ**<br>hoặc **126.758.400 - 152.109.056 VNĐ** | N/A (Chỉ chạy Cloud SaaS) | Giới hạn phụ thuộc plan/add-on<br>(20K hàng/bảng gói Pro,<br>cần AE để expand) |
 | **Airtable** | Business Plan | Tính trên editor (Viewer Interfaces miễn phí) | $5,400 (10 editors) | **142,603,200 VNĐ** | N/A (Chỉ chạy Cloud SaaS) | 125.000 dòng/base |
 | **Grist** | Pro / Self-host | Tính trên member / Self-host free | $4,800 (50 seats Pro)<br>(Bản Pro giới hạn 2 guests) | **126,758,400 VNĐ** | **6.073.840 - 33.010.000 VNĐ**<br>(Chỉ tốn phí VPS hạ tầng) | 100.000 dòng/doc (Cloud)<br>Self-host không giới hạn |
-| **Teable** | Business / Community | Tính trên member / Self-host free | $12,000 (50 seats) | **316,896,000 VNĐ** | **Cần xác minh license**<br>+ Chi phí VPS hạ tầng | 1.000.000 dòng/space (Cloud)<br>Self-host không giới hạn |
-| **SeaTable** | Enterprise | Tính trên member (Cloud & Self-host) | $6,000 (50 seats) | **158,448,000 VNĐ** | **~199,644,480 VNĐ**<br>(€7,000/năm Enterprise) | 100.000 dòng/base (Cloud)<br>Self-host tùy chỉnh |
+| **Teable** | Business / Community | Tính trên member / Self-host free | $12,000 (50 seats Business) | **316,896,000 VNĐ** | **Cần mua bản Enterprise (EE)**<br>để có Authority Matrix | 1.000.000 dòng/space (Business)<br>Self-host không giới hạn |
+| **SeaTable** | Enterprise | Tính trên member (Cloud & Self-host) | €8,400 (50 seats Enterprise) | **238,200,000 VNĐ**<br>(Tỷ giá EUR/VND ~28.360) | **~199,644,480 VNĐ**<br>(€7,000/năm Enterprise) | Không giới hạn dòng (Enterprise)<br>Self-host tùy chỉnh |
 | **Baserow** | Premium Plan | Tính trên member | $6,000 (50 seats) | **158,448,000 VNĐ** | **158,448,000 VNĐ**<br>+ Phí VPS hạ tầng | 50.000 dòng/workspace (Cloud)<br>Self-host tùy chỉnh |
 | **Smartsheet** | Business Plan | Tính trên editor | $3,000 (10 editors) | **79,224,000 VNĐ** | N/A (Chỉ chạy Cloud SaaS) | **20.000 dòng/sheet** (Không đạt) |
 | **Google Sheets**| Workspace Starter | Tính trên member (hoặc Free cá nhân) | $3,600 (50 users) | **95,068,800 VNĐ** | N/A (Chỉ chạy Cloud SaaS) | **10.000.000 cells** (Hiệu năng giảm sâu khi chạy công thức nặng) |
-| **NocoDB** | Enterprise / Community | Tính trên member / Self-host free (no RLS) | Liên hệ trực tiếp | Thỏa thuận Enterprise | **Cần xác minh license Enterprise**<br>+ Chi phí VPS hạ tầng | Không giới hạn (Self-host) |
+| **NocoDB** | Enterprise / Community | Tính trên member / Self-host free (no RLS) | Liên hệ trực tiếp | Thỏa thuận Enterprise | **Cần mua bản Enterprise**<br>để dùng RLS/Access Control |
 | **Retool** | Team Plan | Tính trên Editors ($10) + Viewers ($5) | $3,600 (10 Std + 40 Lgt) | **95,068,800 VNĐ** | Thỏa thuận Enterprise | Tùy thuộc DB kết nối (Postgres) |
 | **Appsmith** | Business Plan | Tính trên giờ active ($0.40/h, max $20/m) | Tối đa $12,000 (50 users) | Tối đa **316,896,000 VNĐ** | Tối đa **316,896,000 VNĐ**<br>+ Phí VPS hạ tầng | Tùy thuộc DB kết nối (Postgres) |
 | **Budibase** | Premium Plan | Tính trên member | $3,000 (50 users) | **79,224,000 VNĐ** | **79,224,000 VNĐ**<br>+ Phí VPS hạ tầng | Tùy thuộc DB kết nối |
@@ -68,13 +68,14 @@ Kịch bản tính toán: **10 Editors (nhập liệu, kế toán, ops) + 40 Vie
 ### 3.2 Phân Tích Chi Tiết Các Phương Án Trọng Điểm
 
 #### A. Lark Base (Pro Plan)
-*   **Giá niêm yết**: $12 / user / tháng.
+*   **Giá niêm yết**: **$8.00 - $9.60 / user / tháng** (Thanh toán theo năm, tùy thuộc vào ưu đãi/vùng đăng ký).
 *   **Cách tính seat**: Lark tính tiền trên tất cả thành viên trong tổ chức (Organization member). Tuy nhiên, đối với viewer bên ngoài hoặc tài khoản Guest (chỉ xem và comment), Lark cho phép chia sẻ miễn phí không giới hạn.
     *   *Phương án 1 (Tối ưu - Guest Link)*: Trả phí Pro cho 10 Editors. 40 Viewers chia sẻ dạng Guest Link hoặc External Collaborator (Read-only).
-        *   *Chi phí*: 10 seats × $12 × 12 tháng = **$1,440 / năm** (~ 38,027,520 VNĐ).
+        *   *Chi phí*: 10 seats × ($8.00 - $9.60) × 12 tháng = **$960 - $1,152 / năm** (~ **25.351.680 - 30.422.016 VNĐ**).
     *   *Phương án 2 (Đầy đủ - Member)*: Cấp tài khoản nội bộ cho toàn bộ 50 user để quản lý tập trung và chat nội bộ.
-        *   *Chi phí*: 50 seats × $12 × 12 tháng = **$7,200 / năm** (~ 190,137,600 VNĐ).
-*   **Giới hạn**: Giới hạn record của Lark Base phụ thuộc plan/add-on; tài liệu Lark ghi các mốc 20K–50K records/table, muốn mở rộng cần xác nhận với sales/Account Executive. Vì vậy POC phải xác minh chính xác plan nào đủ 50K–100K records.
+        *   *Chi phí*: 50 seats × ($8.00 - $9.60) × 12 tháng = **$4,800 - $5,760 / năm** (~ **126.758.400 - 152.109.056 VNĐ**).
+*   **Giới hạn**: Giới hạn record của Lark Base phụ thuộc plan/add-on; gói Pro mặc định là **20.000 hàng/bảng** (20K records/table), muốn mở rộng cần liên hệ với sales/Account Executive để mua thêm add-on mở rộng lên tối đa 2.000.000 dòng.
+
 
 #### B. Airtable (Business Plan)
 *   **Giá niêm yết**: $45 / editor / tháng (Gói Team giá $20 nhưng không hỗ trợ RLS và giới hạn 50k dòng/base). Để cấu hình RLS qua Interfaces và nâng hạn mức lên 125k dòng, bắt buộc dùng gói Business.
