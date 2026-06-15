@@ -6,3 +6,4 @@ dist/
 __pycache__/
 *.pyc
 .venv/
+.claude/worktrees/
