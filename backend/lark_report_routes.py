@@ -202,7 +202,7 @@ def register_lark_report_routes(app, sb_getter):
 
     @router.get("/daily-report")
     def daily_report(
-        report_date: Optional[date] = Query(None, alias="date"),
+        report_date: Optional[str] = Query(None, alias="date"),
     ):
         """Aggregate VN team + 4 location blocks. Returns JSON + pre-rendered text.
 
@@ -211,9 +211,19 @@ def register_lark_report_routes(app, sb_getter):
           Referral Lead placeholders (0 — not in pf-revenue schema yet).
         - `formatted_message`: full text matching Streamlit report template,
           ready for Lark `Send a Lark message` action.
+
+        `date` accepts YYYY-MM-DD or empty string (Lark Automation sends
+        `?date=` when the query param is unset). Empty / invalid → today.
         """
         sb = _sb()
-        d = report_date or date.today()
+        d: date
+        if report_date and report_date.strip():
+            try:
+                d = date.fromisoformat(report_date.strip())
+            except ValueError:
+                d = date.today()
+        else:
+            d = date.today()
         month_start = d.replace(day=1)
 
         start_str = f"{month_start.isoformat()}T00:00:00"
