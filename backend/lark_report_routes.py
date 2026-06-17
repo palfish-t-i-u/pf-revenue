@@ -465,14 +465,59 @@ def register_lark_report_routes(app, sb_getter):
         else:
             d = date.today() - timedelta(days=7)
 
+        SYNC_LOGS_TABLE_ID = "tblfBBHRoTEPLey5"
+
+        def _write_sync_log(token, fields):
+            try:
+                url = (
+                    f"{LARK_DOMAIN}/open-apis/bitable/v1/apps/"
+                    f"{LARK_BASE_APP_TOKEN}/tables/{SYNC_LOGS_TABLE_ID}/records"
+                )
+                _curl_json("POST", url, [f"Authorization: Bearer {token}"], {"fields": fields})
+            except Exception as exc:
+                print(f"[sync-payments] log write fail: {exc}")
+
         def _run_sync_safe(supabase_client, from_str):
+            from datetime import datetime as _dt
+
             try:
                 result = _sync(supabase_client, from_str)
                 print(f"[sync-payments] DONE from={from_str}: {result}")
+                token = _get_lark_token()
+                if not token:
+                    return
+                from_ts = int(_dt.fromisoformat(from_str).timestamp() * 1000)
+                msg = (
+                    f"✅ Sync xong: tạo mới {result.get('payments_created', 0)} đơn + "
+                    f"{result.get('customers_created', 0)} khách hàng. "
+                    f"Bỏ qua {result.get('valid', 0) - result.get('payments_created', 0)} dòng "
+                    f"(đã có hoặc thiếu dữ liệu)."
+                )
+                _write_sync_log(token, {
+                    "Status": "success",
+                    "From Date": from_ts,
+                    "Payments Created": result.get("payments_created", 0),
+                    "Customers Created": result.get("customers_created", 0),
+                    "Skip Stats": json.dumps(result.get("skip_stats", {}), ensure_ascii=False),
+                    "Message": msg,
+                })
             except Exception as exc:
                 import traceback
                 print(f"[sync-payments] FAILED from={from_str}: {exc}")
                 traceback.print_exc()
+                try:
+                    token = _get_lark_token()
+                    if token:
+                        from_ts = int(_dt.fromisoformat(from_str).timestamp() * 1000)
+                        _write_sync_log(token, {
+                            "Status": "error",
+                            "From Date": from_ts,
+                            "Payments Created": 0,
+                            "Customers Created": 0,
+                            "Message": f"❌ Sync lỗi: {str(exc)[:200]}",
+                        })
+                except Exception:
+                    pass
 
         background_tasks.add_task(_run_sync_safe, sb, d.isoformat())
 
