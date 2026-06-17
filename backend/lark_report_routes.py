@@ -437,4 +437,39 @@ def register_lark_report_routes(app, sb_getter):
             ),
         }
 
+    @router.post("/sync-payments")
+    def sync_payments_endpoint(
+        from_date: Optional[str] = Query(None, alias="from"),
+    ):
+        """Incremental sync so_doanh_thu → Lark Base Payments.
+
+        `from`: YYYY-MM-DD, exclusive lower bound for ngay_tien_ve.
+        Default: today minus 7 days (incremental window for daily cron).
+        Empty string → use default (Lark Automation sends `?from=`).
+        """
+        from lark_payment_sync import sync_payments as _sync
+
+        sb = _sb()
+        if from_date and from_date.strip():
+            try:
+                d = date.fromisoformat(from_date.strip())
+            except ValueError:
+                from datetime import timedelta
+                d = date.today() - timedelta(days=7)
+        else:
+            from datetime import timedelta
+            d = date.today() - timedelta(days=7)
+
+        try:
+            result = _sync(sb, d.isoformat())
+        except Exception as exc:
+            raise HTTPException(500, f"Sync error: {exc}")
+
+        result["message"] = (
+            f"✅ Sync xong: {result['payments_created']} payments + "
+            f"{result['customers_created']} customers mới "
+            f"(từ {d.isoformat()})"
+        )
+        return result
+
     app.include_router(router)
