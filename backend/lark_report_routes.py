@@ -480,8 +480,8 @@ def register_lark_report_routes(app, sb_getter):
             "status": "started",
             "from_date": d.isoformat(),
             "message": (
-                f"🔄 Sync đã bắt đầu nền (từ {d.isoformat()}). "
-                f"Mất ~60-90s. Check số đơn Lark Base sau."
+                "🔄 Đã bắt đầu sync data từ sheet All File Thu Hiền về "
+                "Lark Base. Xin vui lòng chờ ~60-90s để dữ liệu cập nhật."
             ),
         }
 
