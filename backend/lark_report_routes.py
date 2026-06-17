@@ -334,4 +334,107 @@ def register_lark_report_routes(app, sb_getter):
         payload["formatted_message"] = _render_message(d, payload)
         return payload
 
+    @router.post("/sync-gmv-formula")
+    def sync_gmv_formula():
+        """Rebuild Payments.`GMV Final` formula from Lark Base `Exchange Rates`.
+
+        Each row in Exchange Rates = (Month, Rate). Formula generated as
+        nested IF: pre-first-month uses `GMV RMB`, then per-month brackets
+        use `GMV VND / rate_of_that_month`. Manager triggers this after
+        editing Exchange Rates table (via Dashboard button → HTTP request).
+        """
+        EXCHANGE_RATES_TABLE_ID = "tblJpwVjAbGK5TeW"
+        PAYMENTS_TABLE_ID = "tbl4FJzV8YC21S9d"
+        GMV_FINAL_FIELD_ID = "fldhpys6ZS"
+        NGAY_FIELD_ID = "fld4N2ceVO"
+        GMV_VND_FIELD_ID = "fld6RdoQd6"
+        GMV_RMB_FIELD_ID = "fld28lShSb"
+
+        T = f"bitable::$table[{PAYMENTS_TABLE_ID}]"
+        NGAY = f"{T}.$field[{NGAY_FIELD_ID}]"
+        GMV_VND = f"{T}.$field[{GMV_VND_FIELD_ID}]"
+        GMV_RMB = f"{T}.$field[{GMV_RMB_FIELD_ID}]"
+
+        token = _get_lark_token()
+        if not token:
+            raise HTTPException(502, "Không lấy được Lark token")
+
+        # Read rates
+        rates_url = (
+            f"{LARK_DOMAIN}/open-apis/bitable/v1/apps/{LARK_BASE_APP_TOKEN}/"
+            f"tables/{EXCHANGE_RATES_TABLE_ID}/records?page_size=200"
+        )
+        data = _curl_json("GET", rates_url, [f"Authorization: Bearer {token}"])
+        if data.get("code") != 0:
+            raise HTTPException(502, f"Lỗi đọc Exchange Rates: {data.get('msg')}")
+
+        rates = []
+        for rec in data.get("data", {}).get("items", []):
+            f = rec.get("fields", {}) or {}
+            month_raw = f.get("Month")
+            rate = f.get("Rate")
+            if not (isinstance(month_raw, (int, float)) and rate):
+                continue
+            d_ = datetime.fromtimestamp(month_raw / 1000).date().replace(day=1)
+            rates.append((d_, float(rate)))
+        rates.sort(key=lambda x: x[0])
+
+        # Build formula
+        if not rates:
+            expr = GMV_RMB
+        else:
+            parts = []
+            first_m = rates[0][0]
+            parts.append(
+                f"IF({NGAY}<DATE({first_m.year},{first_m.month},{first_m.day}),"
+                f"{GMV_RMB},"
+            )
+            for i in range(len(rates) - 1):
+                _, rate_i = rates[i]
+                next_m, _ = rates[i + 1]
+                parts.append(
+                    f"IF({NGAY}<DATE({next_m.year},{next_m.month},{next_m.day}),"
+                    f"{GMV_VND}/{int(rate_i)},"
+                )
+            _, last_rate = rates[-1]
+            parts.append(f"{GMV_VND}/{int(last_rate)}")
+            parts.append(")" * len(rates))
+            expr = "".join(parts)
+
+        # PUT field
+        body = {
+            "field_name": "GMV Final",
+            "type": 20,
+            "property": {
+                "formatter": "¥0.00",
+                "formula_expression": expr,
+                "type": {
+                    "data_type": 2,
+                    "ui_property": {"currency_code": "CNY", "formatter": "0.00"},
+                    "ui_type": "Currency",
+                },
+            },
+        }
+        upd_url = (
+            f"{LARK_DOMAIN}/open-apis/bitable/v1/apps/{LARK_BASE_APP_TOKEN}/"
+            f"tables/{PAYMENTS_TABLE_ID}/fields/{GMV_FINAL_FIELD_ID}"
+        )
+        r = _curl_json("PUT", upd_url, [f"Authorization: Bearer {token}"], body)
+        if r.get("code") != 0:
+            raise HTTPException(502, f"Lỗi update formula: {r.get('msg')}")
+
+        return {
+            "status": "ok",
+            "rates_count": len(rates),
+            "rates": [
+                {"month": d_.isoformat(), "rate": int(r_)} for d_, r_ in rates
+            ],
+            "formula_chars": len(expr),
+            "message": (
+                f"✅ GMV Final formula updated. {len(rates)} rate(s) loaded."
+                if rates
+                else "⚠️ Không có rate nào trong Exchange Rates. Formula fallback GMV RMB."
+            ),
+        }
+
     app.include_router(router)
