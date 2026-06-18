@@ -10,6 +10,7 @@ load_dotenv(Path(__file__).parent / ".env")
 from admin_routes import register_admin_routes
 from payment_routes import register_payment_routes
 from payment_report_routes import register_payment_report_routes
+from lark_report_routes import register_lark_report_routes
 
 app = FastAPI(title="pf-revenue API", version="0.1.0")
 
@@ -39,6 +40,7 @@ def _get_supabase():
 register_admin_routes(app, _get_supabase)
 register_payment_routes(app, _get_supabase)
 register_payment_report_routes(app, _get_supabase)
+register_lark_report_routes(app, _get_supabase)
 
 
 @app.get("/health")

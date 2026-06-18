@@ -1,0 +1,533 @@
+"""Daily report endpoint for Lark Automation.
+
+Aggregates Supabase payments + Lark Base targets into a structured JSON
+matching the legacy Streamlit "Palfish Report Online" template, plus a
+pre-rendered text message ready for `Send a Lark message` action.
+"""
+
+import json
+import os
+import subprocess
+from datetime import date, datetime
+from typing import Optional
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+
+
+def _curl_json(method: str, url: str, headers: list[str], body: Optional[dict] = None) -> dict:
+    """Invoke system curl — Python's httpx/requests/urllib hang on this host
+    when reaching open.larksuite.com (Windows networking quirk), but curl works.
+    """
+    cmd = ["curl", "-s", "--max-time", "30", "-X", method, url]
+    for h in headers:
+        cmd.extend(["-H", h])
+    if body is not None:
+        cmd.extend(["-H", "Content-Type: application/json", "-d", json.dumps(body)])
+    try:
+        out = subprocess.check_output(cmd, timeout=35)
+        return json.loads(out.decode("utf-8"))
+    except Exception:
+        return {}
+
+router = APIRouter(prefix="/api/v1/lark")
+
+
+# ─── Team mapping (Supabase sales.team values) ───────────────────
+TEAMS = {
+    "stellar_garden": ["In-house"],
+    "imperia_garden": ["In-house 2"],
+    "hcm": ["HCM"],
+    "offline": ["Linh Dam Store", "An Binh Store"],
+}
+ONLINE_TEAMS = TEAMS["stellar_garden"] + TEAMS["imperia_garden"] + TEAMS["hcm"]
+OFFLINE_TEAMS = TEAMS["offline"]
+
+# Channel groups for "Including" section (online team only)
+# Mapping per Palfish Report Online doc (Type column → group)
+CHANNEL_GROUPS = {
+    "new_purchase": ["New Purchase"],
+    "general_database": ["GD", "公海"],
+    "referral": ["Refer", "转介绍"],
+    "renew_package": ["Resell", "续费"],
+    "lives": ["Lives", "Livestream"],
+}
+
+# Lark Open API config
+LARK_DOMAIN = "https://open.larksuite.com"
+LARK_APP_ID = os.getenv("LARK_APP_ID", "")
+LARK_APP_SECRET = os.getenv("LARK_APP_SECRET", "")
+LARK_BASE_APP_TOKEN = os.getenv("LARK_BASE_APP_TOKEN", "")
+LARK_TARGETS_TABLE_ID = os.getenv("LARK_TARGETS_TABLE_ID", "")
+
+MONTHS_EN = [
+    "", "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+]
+
+
+def _get_lark_token() -> Optional[str]:
+    if not (LARK_APP_ID and LARK_APP_SECRET):
+        return None
+    data = _curl_json(
+        "POST",
+        f"{LARK_DOMAIN}/open-apis/auth/v3/tenant_access_token/internal",
+        headers=[],
+        body={"app_id": LARK_APP_ID, "app_secret": LARK_APP_SECRET},
+    )
+    if data.get("code") == 0:
+        return data.get("tenant_access_token")
+    return None
+
+
+def _fetch_targets(token: str, target_month: str) -> dict:
+    """Return {location_name: target_gmv_rmb} for the given YYYY-MM month."""
+    if not (token and LARK_BASE_APP_TOKEN and LARK_TARGETS_TABLE_ID):
+        return {}
+    url = (
+        f"{LARK_DOMAIN}/open-apis/bitable/v1/apps/"
+        f"{LARK_BASE_APP_TOKEN}/tables/{LARK_TARGETS_TABLE_ID}/records?page_size=100"
+    )
+    data = _curl_json(
+        "GET",
+        url,
+        headers=[f"Authorization: Bearer {token}"],
+    )
+    if data.get("code") != 0:
+        return {}
+
+    out = {}
+    for rec in data.get("data", {}).get("items", []):
+        f = rec.get("fields", {}) or {}
+        loc = f.get("Location")
+        month_raw = f.get("Month")
+        target = f.get("Target_GMV_RMB", 0)
+
+        # Lark stores Single Select as string OR {text, type}
+        if isinstance(loc, dict):
+            loc = loc.get("text") or loc.get("value")
+        # Lark date as millisecond timestamp
+        if isinstance(month_raw, (int, float)):
+            month_str = datetime.utcfromtimestamp(month_raw / 1000).strftime("%Y-%m")
+        else:
+            month_str = str(month_raw or "")[:7]
+
+        if loc and month_str == target_month:
+            try:
+                out[loc] = float(target or 0)
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def _fmt_rmb(n) -> str:
+    """Format RMB amount as integer with dot thousand separator."""
+    try:
+        return f"{int(round(float(n))):,}".replace(",", ".")
+    except (TypeError, ValueError):
+        return "0"
+
+
+def _render_message(d: date, payload: dict) -> str:
+    vn = payload["vn_team"]
+    sg = payload["stellar_garden"]
+    ig = payload["imperia_garden"]
+    off = payload["offline"]
+    hcm = payload["hcm"]
+
+    date_str = f"{d.day} {MONTHS_EN[d.month]} {d.year}"
+    ch = vn["channels"]
+
+    parts = [
+        date_str,
+        "VN team",
+        f"Today's GMV: {_fmt_rmb(vn['today_gmv'])} RMB",
+        f"Monthly GMV: {_fmt_rmb(vn['monthly_gmv'])} RMB",
+        f"Total: {vn['total_orders']} Order",
+        "Including",
+        f"New Purchase : {ch['new_purchase']}",
+        f"General Database : {ch['general_database']}",
+        f"Referral : {ch['referral']}",
+        f"Renew Package : {ch['renew_package']}",
+        f"Lives : {ch['lives']}",
+        f"Offline Linh Đàm : {ch['offline_linh_dam']}",
+        f"Offline An Bình : {ch['offline_an_binh']}",
+        f"Other channel: {ch['other_channel']}",
+        "",
+        "Stellar Garden",
+        f"Today GMV inhouse Stellar Garden: {_fmt_rmb(sg['today_gmv'])} RMB",
+        f"Monthly GMV inhouse Stellar Garden : {_fmt_rmb(sg['monthly_gmv'])} RMB",
+        f"Progress: {sg['progress_pct']}%",
+        f"Today's Free Trial: {sg['today_free_trial']}",
+        f"Monthly's Free Trial: {sg['monthly_free_trial']}",
+        f"Referral Lead: {sg['today_referral_lead']}",
+        f"Monthly Referral Lead: {sg['monthly_referral_lead']}",
+        "",
+        "Imperia Garden",
+        f"Today GMV inhouse Imperia Garden: {_fmt_rmb(ig['today_gmv'])} RMB",
+        f"Monthly GMV inhouse Imperia Garden : {_fmt_rmb(ig['monthly_gmv'])} RMB",
+        f"Progress: {ig['progress_pct']}%",
+        f"Today's Free Trial: {ig['today_free_trial']}",
+        f"Monthly's Free Trial: {ig['monthly_free_trial']}",
+        f"Referral Lead: {ig['today_referral_lead']}",
+        f"Monthly Referral Lead: {ig['monthly_referral_lead']}",
+        "",
+        "Offline",
+        f"Today's GMV Offline: {_fmt_rmb(off['today_gmv'])} RMB",
+        f"Monthly GMV Offline : {_fmt_rmb(off['monthly_gmv'])} RMB",
+        f"Progress: {off['progress_pct']}%",
+        f"Today's Free Trial: {off['today_free_trial']}",
+        f"Monthly's Free Trial: {off['monthly_free_trial']}",
+        f"Referral Lead: {off['today_referral_lead']}",
+        f"Monthly Referral Lead: {off['monthly_referral_lead']}",
+        "",
+        "HCM",
+        f"Today's GMV HCM: {_fmt_rmb(hcm['today_gmv'])} RMB",
+        f"Monthly GMV HCM : {_fmt_rmb(hcm['monthly_gmv'])} RMB",
+        f"Progress: {hcm['progress_pct']}%",
+        f"Today's Free Trial: {hcm['today_free_trial']}",
+        f"Monthly's Free Trial: {hcm['monthly_free_trial']}",
+        f"Referral Lead: {hcm['today_referral_lead']}",
+        f"Monthly Referral Lead: {hcm['monthly_referral_lead']}",
+    ]
+    return "\n".join(parts)
+
+
+def register_lark_report_routes(app, sb_getter):
+
+    def _sb():
+        sb = sb_getter()
+        if not sb:
+            raise HTTPException(503, "Supabase chưa được cấu hình")
+        return sb
+
+    @router.get("/daily-report")
+    def daily_report(
+        report_date: Optional[str] = Query(None, alias="date"),
+    ):
+        """Aggregate VN team + 4 location blocks. Returns JSON + pre-rendered text.
+
+        - `vn_team.channels`: 5 channel groups (online only) + 2 offline rows + other.
+        - Per-location: today/monthly GMV (RMB), progress %, plus Free Trial /
+          Referral Lead placeholders (0 — not in pf-revenue schema yet).
+        - `formatted_message`: full text matching Streamlit report template,
+          ready for Lark `Send a Lark message` action.
+
+        `date` accepts YYYY-MM-DD or empty string (Lark Automation sends
+        `?date=` when the query param is unset). Empty / invalid → today.
+        """
+        sb = _sb()
+        d: date
+        if report_date and report_date.strip():
+            try:
+                d = date.fromisoformat(report_date.strip())
+            except ValueError:
+                d = date.today()
+        else:
+            d = date.today()
+        month_start = d.replace(day=1)
+
+        start_str = f"{month_start.isoformat()}T00:00:00"
+        end_str = f"{d.isoformat()}T23:59:59"
+
+        try:
+            payments_res = (
+                sb.table("payments")
+                .select("pay_time, team, channel_id, gmv_final")
+                .is_("deleted_at", "null")
+                .eq("status", "active")
+                .gte("pay_time", start_str)
+                .lte("pay_time", end_str)
+                .execute()
+            )
+            payments = payments_res.data or []
+        except Exception as exc:
+            raise HTTPException(500, f"Lỗi query payments: {exc}")
+
+        try:
+            channel_res = sb.table("channels").select("id, name").execute()
+            channel_map = {
+                c["id"]: (c.get("name") or "")
+                for c in (channel_res.data or [])
+            }
+        except Exception:
+            channel_map = {}
+
+        today_str = d.isoformat()
+
+        def is_today(p):
+            return (p.get("pay_time") or "")[:10] == today_str
+
+        def channel_of(p):
+            return channel_map.get(p.get("channel_id"), "")
+
+        def aggregate(team_list, today_only=False, channels=None):
+            count = 0
+            gmv = 0.0
+            for p in payments:
+                if p.get("team") not in team_list:
+                    continue
+                if today_only and not is_today(p):
+                    continue
+                if channels is not None and channel_of(p) not in channels:
+                    continue
+                count += 1
+                gmv += float(p.get("gmv_final") or 0)
+            return count, gmv
+
+        # ── VN team totals ───────────────────────────────────────
+        today_count_online, today_gmv_online = aggregate(ONLINE_TEAMS, today_only=True)
+        today_count_offline, today_gmv_offline = aggregate(OFFLINE_TEAMS, today_only=True)
+        _, monthly_gmv_online = aggregate(ONLINE_TEAMS, today_only=False)
+        _, monthly_gmv_offline = aggregate(OFFLINE_TEAMS, today_only=False)
+
+        today_total_count = today_count_online + today_count_offline
+        today_gmv_total = today_gmv_online + today_gmv_offline
+        monthly_gmv_total = monthly_gmv_online + monthly_gmv_offline
+
+        # ── Channel breakdown (online only, today) ───────────────
+        channel_counts = {}
+        for grp_key, ch_list in CHANNEL_GROUPS.items():
+            c, _ = aggregate(ONLINE_TEAMS, today_only=True, channels=ch_list)
+            channel_counts[grp_key] = c
+        sum_grouped = sum(channel_counts.values())
+        channel_counts["other_channel"] = max(0, today_count_online - sum_grouped)
+
+        ld_count, _ = aggregate(["Linh Dam Store"], today_only=True)
+        ab_count, _ = aggregate(["An Binh Store"], today_only=True)
+        channel_counts["offline_linh_dam"] = ld_count
+        channel_counts["offline_an_binh"] = ab_count
+
+        # ── Targets from Lark Base ───────────────────────────────
+        token = _get_lark_token()
+        targets = _fetch_targets(token, d.strftime("%Y-%m")) if token else {}
+
+        def loc_block(team_list, target_key):
+            _, today_gmv = aggregate(team_list, today_only=True)
+            _, monthly_gmv = aggregate(team_list, today_only=False)
+            target = float(targets.get(target_key, 0) or 0)
+            progress = round(monthly_gmv / target * 100, 2) if target > 0 else 0
+            return {
+                "today_gmv": today_gmv,
+                "monthly_gmv": monthly_gmv,
+                "target": target,
+                "progress_pct": progress,
+                "today_free_trial": 0,
+                "monthly_free_trial": 0,
+                "today_referral_lead": 0,
+                "monthly_referral_lead": 0,
+            }
+
+        payload = {
+            "date": d.isoformat(),
+            "vn_team": {
+                "today_gmv": today_gmv_total,
+                "monthly_gmv": monthly_gmv_total,
+                "total_orders": today_total_count,
+                "channels": channel_counts,
+            },
+            "stellar_garden": loc_block(TEAMS["stellar_garden"], "Stellar Garden"),
+            "imperia_garden": loc_block(TEAMS["imperia_garden"], "Imperia Garden"),
+            "offline": loc_block(TEAMS["offline"], "Offline"),
+            "hcm": loc_block(TEAMS["hcm"], "HCM"),
+            "targets_loaded": bool(targets),
+        }
+        payload["formatted_message"] = _render_message(d, payload)
+        return payload
+
+    @router.post("/sync-gmv-formula")
+    def sync_gmv_formula():
+        """Rebuild Payments.`GMV Final` formula from Lark Base `Exchange Rates`.
+
+        Each row in Exchange Rates = (Month, Rate). Formula generated as
+        nested IF: pre-first-month uses `GMV RMB`, then per-month brackets
+        use `GMV VND / rate_of_that_month`. Manager triggers this after
+        editing Exchange Rates table (via Dashboard button → HTTP request).
+        """
+        EXCHANGE_RATES_TABLE_ID = "tblJpwVjAbGK5TeW"
+        PAYMENTS_TABLE_ID = "tbl4FJzV8YC21S9d"
+        GMV_FINAL_FIELD_ID = "fldhpys6ZS"
+        NGAY_FIELD_ID = "fld4N2ceVO"
+        GMV_VND_FIELD_ID = "fld6RdoQd6"
+        GMV_RMB_FIELD_ID = "fld28lShSb"
+
+        T = f"bitable::$table[{PAYMENTS_TABLE_ID}]"
+        NGAY = f"{T}.$field[{NGAY_FIELD_ID}]"
+        GMV_VND = f"{T}.$field[{GMV_VND_FIELD_ID}]"
+        GMV_RMB = f"{T}.$field[{GMV_RMB_FIELD_ID}]"
+
+        token = _get_lark_token()
+        if not token:
+            raise HTTPException(502, "Không lấy được Lark token")
+
+        # Read rates
+        rates_url = (
+            f"{LARK_DOMAIN}/open-apis/bitable/v1/apps/{LARK_BASE_APP_TOKEN}/"
+            f"tables/{EXCHANGE_RATES_TABLE_ID}/records?page_size=200"
+        )
+        data = _curl_json("GET", rates_url, [f"Authorization: Bearer {token}"])
+        if data.get("code") != 0:
+            raise HTTPException(502, f"Lỗi đọc Exchange Rates: {data.get('msg')}")
+
+        rates = []
+        for rec in data.get("data", {}).get("items", []):
+            f = rec.get("fields", {}) or {}
+            month_raw = f.get("Month")
+            rate = f.get("Rate")
+            if not (isinstance(month_raw, (int, float)) and rate):
+                continue
+            d_ = datetime.fromtimestamp(month_raw / 1000).date().replace(day=1)
+            rates.append((d_, float(rate)))
+        rates.sort(key=lambda x: x[0])
+
+        # Build formula
+        if not rates:
+            expr = GMV_RMB
+        else:
+            parts = []
+            first_m = rates[0][0]
+            parts.append(
+                f"IF({NGAY}<DATE({first_m.year},{first_m.month},{first_m.day}),"
+                f"{GMV_RMB},"
+            )
+            for i in range(len(rates) - 1):
+                _, rate_i = rates[i]
+                next_m, _ = rates[i + 1]
+                parts.append(
+                    f"IF({NGAY}<DATE({next_m.year},{next_m.month},{next_m.day}),"
+                    f"{GMV_VND}/{int(rate_i)},"
+                )
+            _, last_rate = rates[-1]
+            parts.append(f"{GMV_VND}/{int(last_rate)}")
+            parts.append(")" * len(rates))
+            expr = "".join(parts)
+
+        # PUT field
+        body = {
+            "field_name": "GMV Final",
+            "type": 20,
+            "property": {
+                "formatter": "¥0.00",
+                "formula_expression": expr,
+                "type": {
+                    "data_type": 2,
+                    "ui_property": {"currency_code": "CNY", "formatter": "0.00"},
+                    "ui_type": "Currency",
+                },
+            },
+        }
+        upd_url = (
+            f"{LARK_DOMAIN}/open-apis/bitable/v1/apps/{LARK_BASE_APP_TOKEN}/"
+            f"tables/{PAYMENTS_TABLE_ID}/fields/{GMV_FINAL_FIELD_ID}"
+        )
+        r = _curl_json("PUT", upd_url, [f"Authorization: Bearer {token}"], body)
+        if r.get("code") != 0:
+            raise HTTPException(502, f"Lỗi update formula: {r.get('msg')}")
+
+        return {
+            "status": "ok",
+            "rates_count": len(rates),
+            "rates": [
+                {"month": d_.isoformat(), "rate": int(r_)} for d_, r_ in rates
+            ],
+            "formula_chars": len(expr),
+            "message": (
+                f"✅ GMV Final formula updated. {len(rates)} rate(s) loaded."
+                if rates
+                else "⚠️ Không có rate nào trong Exchange Rates. Formula fallback GMV RMB."
+            ),
+        }
+
+    @router.post("/sync-payments")
+    def sync_payments_endpoint(
+        background_tasks: BackgroundTasks,
+        from_date: Optional[str] = Query(None, alias="from"),
+    ):
+        """Incremental sync so_doanh_thu → Lark Base Payments.
+
+        Sync takes 60-90s (fetch 10K Customers + 15K Payments). Lark
+        Automation HTTP times out at 60s, so we return immediately and
+        run the work in a background task. User refreshes Lark Base to
+        verify; logs visible in Render dashboard.
+
+        `from`: YYYY-MM-DD, exclusive lower bound for ngay_tien_ve.
+        Default: 7 days ago. Empty string → use default.
+        """
+        from datetime import timedelta
+
+        from lark_payment_sync import sync_payments as _sync
+
+        sb = _sb()
+        if from_date and from_date.strip():
+            try:
+                d = date.fromisoformat(from_date.strip())
+            except ValueError:
+                d = date.today() - timedelta(days=7)
+        else:
+            d = date.today() - timedelta(days=7)
+
+        SYNC_LOGS_TABLE_ID = "tblfBBHRoTEPLey5"
+
+        def _write_sync_log(token, fields):
+            try:
+                url = (
+                    f"{LARK_DOMAIN}/open-apis/bitable/v1/apps/"
+                    f"{LARK_BASE_APP_TOKEN}/tables/{SYNC_LOGS_TABLE_ID}/records"
+                )
+                _curl_json("POST", url, [f"Authorization: Bearer {token}"], {"fields": fields})
+            except Exception as exc:
+                print(f"[sync-payments] log write fail: {exc}")
+
+        def _run_sync_safe(supabase_client, from_str):
+            from datetime import datetime as _dt
+
+            try:
+                result = _sync(supabase_client, from_str)
+                print(f"[sync-payments] DONE from={from_str}: {result}")
+                token = _get_lark_token()
+                if not token:
+                    return
+                from_ts = int(_dt.fromisoformat(from_str).timestamp() * 1000)
+                msg = (
+                    f"✅ Sync xong: tạo mới {result.get('payments_created', 0)} đơn + "
+                    f"{result.get('customers_created', 0)} khách hàng. "
+                    f"Bỏ qua {result.get('valid', 0) - result.get('payments_created', 0)} dòng "
+                    f"(đã có hoặc thiếu dữ liệu)."
+                )
+                _write_sync_log(token, {
+                    "Status": "success",
+                    "From Date": from_ts,
+                    "Payments Created": result.get("payments_created", 0),
+                    "Customers Created": result.get("customers_created", 0),
+                    "Skip Stats": json.dumps(result.get("skip_stats", {}), ensure_ascii=False),
+                    "Message": msg,
+                })
+            except Exception as exc:
+                import traceback
+                print(f"[sync-payments] FAILED from={from_str}: {exc}")
+                traceback.print_exc()
+                try:
+                    token = _get_lark_token()
+                    if token:
+                        from_ts = int(_dt.fromisoformat(from_str).timestamp() * 1000)
+                        _write_sync_log(token, {
+                            "Status": "error",
+                            "From Date": from_ts,
+                            "Payments Created": 0,
+                            "Customers Created": 0,
+                            "Message": f"❌ Sync lỗi: {str(exc)[:200]}",
+                        })
+                except Exception:
+                    pass
+
+        background_tasks.add_task(_run_sync_safe, sb, d.isoformat())
+
+        return {
+            "status": "started",
+            "from_date": d.isoformat(),
+            "message": (
+                "🔄 Đã bắt đầu sync data từ sheet All File Thu Hiền về "
+                "Lark Base. Xin vui lòng chờ ~60-90s để dữ liệu cập nhật."
+            ),
+        }
+
+    app.include_router(router)
