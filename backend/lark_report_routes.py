@@ -689,12 +689,12 @@ def register_lark_report_routes(app, sb_getter):
             reverse=True,
         )
 
-        def fmt(n):
+        def _num(n):
             if n is None or n == "" or n == 0:
-                return ""
+                return None
             if isinstance(n, float):
-                n = round(n)
-            return f"{int(n):,}".replace(",", ".")
+                return round(n)
+            return int(n)
 
         # ── Build BCTB grid ─────────────────────────────────────
         row1 = ["Sale", "Total", "", ""]
@@ -708,21 +708,21 @@ def register_lark_report_routes(app, sb_getter):
             for k in grand:
                 grand[k] += sale_totals[s][k]
 
-        row_total = ["Total", fmt(grand["gmv_vnd"]), fmt(round(grand["gmv_rmb"])), str(grand["count"])]
+        row_total = ["Total", _num(grand["gmv_vnd"]), _num(grand["gmv_rmb"]), _num(grand["count"])]
         for d in dates:
             dv = sum(sale_agg[s].get(d, {}).get("gmv_vnd", 0) for s in sorted_sales)
             dr = sum(sale_agg[s].get(d, {}).get("gmv_rmb", 0) for s in sorted_sales)
             dc = sum(sale_agg[s].get(d, {}).get("count", 0) for s in sorted_sales)
-            row_total.extend([fmt(dv), fmt(round(dr)), str(dc) if dc else ""])
+            row_total.extend([_num(dv), _num(dr), _num(dc)])
 
         bctb_data = [row1, row2, row_total]
         for s in sorted_sales:
             t = sale_totals[s]
-            row = [s, fmt(t["gmv_vnd"]), fmt(round(t["gmv_rmb"])), str(t["count"])]
+            row = [s, _num(t["gmv_vnd"]), _num(t["gmv_rmb"]), _num(t["count"])]
             for d in dates:
                 day = sale_agg[s].get(d, {})
                 v, r_, c = day.get("gmv_vnd", 0), day.get("gmv_rmb", 0), day.get("count", 0)
-                row.extend([fmt(v), fmt(round(r_)) if r_ else "", str(c) if c else ""])
+                row.extend([_num(v), _num(r_), _num(c)])
             bctb_data.append(row)
 
         bctb_end = _col_letter(len(row1) - 1)
@@ -740,10 +740,10 @@ def register_lark_report_routes(app, sb_getter):
             for k in gt:
                 gt[k] += chan_totals[ch][k]
 
-        row_totalb = ["Total", str(gt["count"]), fmt(round(gt["gmv_rmb"])), str(gt["don_dau"])]
+        row_totalb = ["Total", _num(gt["count"]), _num(gt["gmv_rmb"]), _num(gt["don_dau"])]
         for ch in sorted_channels:
             t = chan_totals[ch]
-            row_totalb.extend([str(t["count"]), fmt(round(t["gmv_rmb"])), str(t["don_dau"])])
+            row_totalb.extend([_num(t["count"]), _num(t["gmv_rmb"]), _num(t["don_dau"])])
 
         bc_data = [row1b, row2b, row_totalb]
         for d in reversed(dates):
@@ -751,14 +751,10 @@ def register_lark_report_routes(app, sb_getter):
             dc = sum(chan_agg[ch].get(d, {}).get("count", 0) for ch in sorted_channels)
             dr = sum(chan_agg[ch].get(d, {}).get("gmv_rmb", 0) for ch in sorted_channels)
             dd = sum(chan_agg[ch].get(d, {}).get("don_dau", 0) for ch in sorted_channels)
-            row.extend([str(dc), fmt(round(dr)), str(dd)])
+            row.extend([_num(dc), _num(dr), _num(dd)])
             for ch in sorted_channels:
                 day = chan_agg[ch].get(d, {})
-                row.extend([
-                    str(day.get("count", "")) if day.get("count", 0) else "",
-                    fmt(round(day.get("gmv_rmb", 0))) if day.get("gmv_rmb", 0) else "",
-                    str(day.get("don_dau", "")) if day.get("don_dau", 0) else "",
-                ])
+                row.extend([_num(day.get("count", 0)), _num(day.get("gmv_rmb", 0)), _num(day.get("don_dau", 0))])
             bc_data.append(row)
 
         bc_end = _col_letter(len(row1b) - 1)
@@ -773,6 +769,22 @@ def register_lark_report_routes(app, sb_getter):
                 {"valueRange": {"range": rng, "values": vals}},
             )
             print(f"[refresh-sheets] {label} write: code={r.get('code')}")
+
+        # ── Apply number format #,##0 to data cells ────────────
+        bctb_num_range = f"{REPORT_BCTB_SHEET_ID}!B3:{bctb_end}{len(bctb_data)}"
+        bc_num_range = f"{REPORT_BC_CHAN_SHEET_ID}!B3:{bc_end}{len(bc_data)}"
+        for num_rng in [bctb_num_range, bc_num_range]:
+            _curl_json(
+                "PUT",
+                f"{sheets_base}/style",
+                [auth],
+                {
+                    "appendStyle": {
+                        "range": num_rng,
+                        "style": {"formatter": "#,##0"},
+                    }
+                },
+            )
 
         print(
             f"[refresh-sheets] DONE — BCTB {len(bctb_data)} rows, "
