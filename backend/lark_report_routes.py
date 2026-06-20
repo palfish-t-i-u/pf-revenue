@@ -530,4 +530,266 @@ def register_lark_report_routes(app, sb_getter):
             ),
         }
 
+    # ── Lark Sheet report refresh ──────────────────────────────
+    REPORT_SHEET_TOKEN = os.getenv(
+        "LARK_REPORT_SHEET_TOKEN", "LWqIs3Q8Ph49a7tEE6FjgdYipJg"
+    )
+    REPORT_BCTB_SHEET_ID = "f40d7f"
+    REPORT_BC_CHAN_SHEET_ID = "SXJEk"
+    PAYMENTS_TABLE_ID = "tbl4FJzV8YC21S9d"
+    SALES_TABLE_ID = "tbl2umPupa2LUKws"
+    CHANNELS_TABLE_ID = "tbl3aHNFWx08gPqm"
+    CURRENT_MONTH_VIEW = "veweMuTm6b"
+
+    def _extract_text(val):
+        if isinstance(val, str):
+            return val
+        if isinstance(val, list):
+            return "".join(
+                v.get("text", "") if isinstance(v, dict) else str(v) for v in val
+            )
+        if isinstance(val, dict):
+            return val.get("text", str(val))
+        return str(val) if val else ""
+
+    def _lark_search_records(token, table_id, body, page_size=500):
+        """Paginated search across a Lark Base table."""
+        all_items = []
+        page_token = None
+        while True:
+            url = (
+                f"{LARK_DOMAIN}/open-apis/bitable/v1/apps/"
+                f"{LARK_BASE_APP_TOKEN}/tables/{table_id}/records/search"
+                f"?page_size={page_size}"
+            )
+            if page_token:
+                url += f"&page_token={page_token}"
+            data = _curl_json(
+                "POST", url, [f"Authorization: Bearer {token}"], body
+            )
+            items = data.get("data", {}).get("items", [])
+            all_items.extend(items)
+            if not data.get("data", {}).get("has_more", False):
+                break
+            page_token = data["data"].get("page_token")
+        return all_items
+
+    def _col_letter(n):
+        result = ""
+        while n >= 0:
+            result = chr(65 + n % 26) + result
+            n = n // 26 - 1
+        return result
+
+    def _refresh_sheets_work():
+        from collections import defaultdict
+
+        token = _get_lark_token()
+        if not token:
+            print("[refresh-sheets] ERROR: cannot get Lark token")
+            return
+
+        auth = f"Authorization: Bearer {token}"
+        sheets_base = f"{LARK_DOMAIN}/open-apis/sheets/v2/spreadsheets/{REPORT_SHEET_TOKEN}"
+
+        # ── Fetch current-month payments ────────────────────────
+        records = _lark_search_records(
+            token,
+            PAYMENTS_TABLE_ID,
+            {
+                "view_id": CURRENT_MONTH_VIEW,
+                "field_names": [
+                    "Ngày thanh toán", "Sale", "Kênh", "GMV VND", "GMV RMB",
+                ],
+            },
+        )
+        print(f"[refresh-sheets] payments: {len(records)}")
+
+        # ── Sales lookup ────────────────────────────────────────
+        sale_items = _lark_search_records(
+            token, SALES_TABLE_ID,
+            {"field_names": ["Họ tên", "Team"]},
+        )
+        sale_map = {}
+        for s in sale_items:
+            f = s.get("fields", {})
+            sale_map[s["record_id"]] = {
+                "name": _extract_text(f.get("Họ tên", "")),
+                "team": str(f.get("Team", "")),
+            }
+
+        # ── Channels lookup ─────────────────────────────────────
+        chan_items = _lark_search_records(
+            token, CHANNELS_TABLE_ID,
+            {"field_names": ["Tên kênh", "Loại"]},
+        )
+        chan_map = {}
+        for c in chan_items:
+            f = c.get("fields", {})
+            name = _extract_text(f.get("Tên kênh", "")) or _extract_text(
+                f.get("Loại", "")
+            )
+            chan_map[c["record_id"]] = name
+
+        # ── Aggregate ───────────────────────────────────────────
+        sale_agg = defaultdict(lambda: defaultdict(lambda: {"gmv_vnd": 0, "gmv_rmb": 0, "count": 0}))
+        chan_agg = defaultdict(lambda: defaultdict(lambda: {"count": 0, "gmv_rmb": 0, "don_dau": 0}))
+        dates_set = set()
+
+        for r in records:
+            f = r.get("fields", {})
+            ts = f.get("Ngày thanh toán")
+            if not ts:
+                continue
+            d_str = datetime.fromtimestamp(ts / 1000).strftime("%m-%d")
+            dates_set.add(d_str)
+
+            gmv_vnd = f.get("GMV VND", 0) if isinstance(f.get("GMV VND"), (int, float)) else 0
+            gmv_rmb = f.get("GMV RMB", 0) if isinstance(f.get("GMV RMB"), (int, float)) else 0
+
+            sale_info = f.get("Sale", {})
+            sale_ids = sale_info.get("link_record_ids", []) if isinstance(sale_info, dict) else []
+            sale_name = sale_map.get(sale_ids[0], {}).get("name", "Unknown") if sale_ids else "Unknown"
+            sale_agg[sale_name][d_str]["gmv_vnd"] += gmv_vnd
+            sale_agg[sale_name][d_str]["gmv_rmb"] += gmv_rmb
+            sale_agg[sale_name][d_str]["count"] += 1
+
+            chan_info = f.get("Kênh", {})
+            chan_ids = chan_info.get("link_record_ids", []) if isinstance(chan_info, dict) else []
+            channel = chan_map.get(chan_ids[0], "Unknown") if chan_ids else "N/A"
+            chan_agg[channel][d_str]["count"] += 1
+            chan_agg[channel][d_str]["gmv_rmb"] += gmv_rmb
+            chan_agg[channel][d_str]["don_dau"] += 1
+
+        dates = sorted(dates_set)
+
+        # Sale totals
+        sale_totals = {}
+        for sale in sale_agg:
+            t = {"gmv_vnd": 0, "gmv_rmb": 0, "count": 0}
+            for d in dates:
+                day = sale_agg[sale].get(d, {"gmv_vnd": 0, "gmv_rmb": 0, "count": 0})
+                for k in t:
+                    t[k] += day[k]
+            sale_totals[sale] = t
+        sorted_sales = sorted(sale_totals, key=lambda s: sale_totals[s]["gmv_vnd"], reverse=True)
+
+        # Channel totals
+        chan_totals = {}
+        for ch in chan_agg:
+            t = {"count": 0, "gmv_rmb": 0, "don_dau": 0}
+            for d in dates:
+                day = chan_agg[ch].get(d, {"count": 0, "gmv_rmb": 0, "don_dau": 0})
+                for k in t:
+                    t[k] += day[k]
+            chan_totals[ch] = t
+        sorted_channels = sorted(
+            [c for c in chan_totals if c not in ("Unknown", "N/A")],
+            key=lambda c: chan_totals[c]["count"],
+            reverse=True,
+        )
+
+        def fmt(n):
+            if n is None or n == "" or n == 0:
+                return ""
+            if isinstance(n, float):
+                n = round(n)
+            return f"{int(n):,}".replace(",", ".")
+
+        # ── Build BCTB grid ─────────────────────────────────────
+        row1 = ["Sale", "Total", "", ""]
+        row2 = ["", "GMV VND", "GMV RMB", "Order"]
+        for d in dates:
+            row1.extend([d, "", ""])
+            row2.extend(["GMV VND", "GMV RMB", "Order"])
+
+        grand = {"gmv_vnd": 0, "gmv_rmb": 0, "count": 0}
+        for s in sorted_sales:
+            for k in grand:
+                grand[k] += sale_totals[s][k]
+
+        row_total = ["Total", fmt(grand["gmv_vnd"]), fmt(round(grand["gmv_rmb"])), str(grand["count"])]
+        for d in dates:
+            dv = sum(sale_agg[s].get(d, {}).get("gmv_vnd", 0) for s in sorted_sales)
+            dr = sum(sale_agg[s].get(d, {}).get("gmv_rmb", 0) for s in sorted_sales)
+            dc = sum(sale_agg[s].get(d, {}).get("count", 0) for s in sorted_sales)
+            row_total.extend([fmt(dv), fmt(round(dr)), str(dc) if dc else ""])
+
+        bctb_data = [row1, row2, row_total]
+        for s in sorted_sales:
+            t = sale_totals[s]
+            row = [s, fmt(t["gmv_vnd"]), fmt(round(t["gmv_rmb"])), str(t["count"])]
+            for d in dates:
+                day = sale_agg[s].get(d, {})
+                v, r_, c = day.get("gmv_vnd", 0), day.get("gmv_rmb", 0), day.get("count", 0)
+                row.extend([fmt(v), fmt(round(r_)) if r_ else "", str(c) if c else ""])
+            bctb_data.append(row)
+
+        bctb_end = _col_letter(len(row1) - 1)
+        bctb_range = f"{REPORT_BCTB_SHEET_ID}!A1:{bctb_end}{len(bctb_data)}"
+
+        # ── Build BC Team Kênh grid ─────────────────────────────
+        row1b = ["Ngày", "Total", "", ""]
+        row2b = ["", "Số đơn", "GMV RMB", "Đơn đầu"]
+        for ch in sorted_channels:
+            row1b.extend([ch, "", ""])
+            row2b.extend(["Số đơn", "GMV RMB", "Đơn đầu"])
+
+        gt = {"count": 0, "gmv_rmb": 0, "don_dau": 0}
+        for ch in sorted_channels:
+            for k in gt:
+                gt[k] += chan_totals[ch][k]
+
+        row_totalb = ["Total", str(gt["count"]), fmt(round(gt["gmv_rmb"])), str(gt["don_dau"])]
+        for ch in sorted_channels:
+            t = chan_totals[ch]
+            row_totalb.extend([str(t["count"]), fmt(round(t["gmv_rmb"])), str(t["don_dau"])])
+
+        bc_data = [row1b, row2b, row_totalb]
+        for d in reversed(dates):
+            row = [d]
+            dc = sum(chan_agg[ch].get(d, {}).get("count", 0) for ch in sorted_channels)
+            dr = sum(chan_agg[ch].get(d, {}).get("gmv_rmb", 0) for ch in sorted_channels)
+            dd = sum(chan_agg[ch].get(d, {}).get("don_dau", 0) for ch in sorted_channels)
+            row.extend([str(dc), fmt(round(dr)), str(dd)])
+            for ch in sorted_channels:
+                day = chan_agg[ch].get(d, {})
+                row.extend([
+                    str(day.get("count", "")) if day.get("count", 0) else "",
+                    fmt(round(day.get("gmv_rmb", 0))) if day.get("gmv_rmb", 0) else "",
+                    str(day.get("don_dau", "")) if day.get("don_dau", 0) else "",
+                ])
+            bc_data.append(row)
+
+        bc_end = _col_letter(len(row1b) - 1)
+        bc_range = f"{REPORT_BC_CHAN_SHEET_ID}!A1:{bc_end}{len(bc_data)}"
+
+        # ── Write both sheets ───────────────────────────────────
+        for label, rng, vals in [("BCTB", bctb_range, bctb_data), ("BC", bc_range, bc_data)]:
+            r = _curl_json(
+                "PUT",
+                f"{sheets_base}/values",
+                [auth],
+                {"valueRange": {"range": rng, "values": vals}},
+            )
+            print(f"[refresh-sheets] {label} write: code={r.get('code')}")
+
+        print(
+            f"[refresh-sheets] DONE — BCTB {len(bctb_data)} rows, "
+            f"BC {len(bc_data)} rows, {len(dates)} dates"
+        )
+
+    @router.post("/refresh-report-sheets")
+    def refresh_report_sheets(background_tasks: BackgroundTasks):
+        """Refresh BCTB + BC Team Kênh Lark Sheets with latest Payments data.
+
+        Runs in background (~30s). Triggered by Lark Automation or manual call.
+        """
+        background_tasks.add_task(_refresh_sheets_work)
+        return {
+            "status": "started",
+            "sheet_url": f"https://ajpiov2uned8.jp.larksuite.com/sheets/{REPORT_SHEET_TOKEN}",
+            "message": "Đang cập nhật báo cáo BCTB + BC Team Kênh...",
+        }
+
     app.include_router(router)
