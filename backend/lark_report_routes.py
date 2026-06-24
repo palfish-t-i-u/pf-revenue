@@ -8,7 +8,7 @@ pre-rendered text message ready for `Send a Lark message` action.
 import json
 import os
 import subprocess
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
@@ -794,6 +794,86 @@ def register_lark_report_routes(app, sb_getter):
             f"[refresh-sheets] DONE — BCTB {len(bctb_data)} rows, "
             f"BC {len(bc_data)} rows, {len(dates)} dates"
         )
+
+    @router.post("/sync-bank-transactions")
+    def sync_bank_transactions_endpoint(
+        background_tasks: BackgroundTasks,
+        from_iso: Optional[str] = Query(None, alias="from"),
+        window_minutes: Optional[int] = Query(10, alias="window"),
+    ):
+        """Incremental sync bank_transactions → Lark "GD SePay".
+
+        Sliding window: lấy bản ghi `bank_transactions.created_at` > `from`.
+        Nếu không truyền `from`, mặc định `now - window_minutes`.
+
+        Lark Automation chạy mỗi 1-5 phút gọi endpoint này. Dedup theo
+        "Mã giao dịch SePay" trên Lark nên gọi lặp lại an toàn.
+
+        Trả về 'started' ngay; sync chạy nền (tránh timeout 60s của Lark Automation).
+        """
+        from datetime import timedelta
+
+        from lark_bank_tx_sync import sync_bank_transactions as _sync
+
+        sb = _sb()
+        if from_iso and from_iso.strip():
+            from_str = from_iso.strip()
+        else:
+            window = max(1, int(window_minutes or 10))
+            from_dt = datetime.now(timezone.utc) - timedelta(minutes=window)
+            from_str = from_dt.isoformat()
+
+        SYNC_LOGS_TABLE_ID = "tblfBBHRoTEPLey5"
+
+        def _write_sync_log(token, fields):
+            try:
+                url = (
+                    f"{LARK_DOMAIN}/open-apis/bitable/v1/apps/"
+                    f"{LARK_BASE_APP_TOKEN}/tables/{SYNC_LOGS_TABLE_ID}/records"
+                )
+                _curl_json("POST", url, [f"Authorization: Bearer {token}"], {"fields": fields})
+            except Exception as exc:
+                print(f"[sync-bank-tx] log write fail: {exc}")
+
+        def _run_sync_safe(supabase_client, from_arg):
+            try:
+                result = _sync(supabase_client, from_arg)
+                print(f"[sync-bank-tx] DONE from={from_arg}: {result}")
+                token = _get_lark_token()
+                if not token:
+                    return
+                # Reuse SYNC_LOGS_TABLE_ID — phân biệt qua "Message" tag prefix
+                msg = (
+                    f"✅ SePay sync: tạo mới {result.get('created', 0)} GD. "
+                    f"Bỏ qua {sum(result.get('skip_stats', {}).values())}."
+                )
+                _write_sync_log(token, {
+                    "Status": "success",
+                    "Payments Created": result.get("created", 0),
+                    "Skip Stats": json.dumps(result.get("skip_stats", {}), ensure_ascii=False),
+                    "Message": f"[SePay] {msg}",
+                })
+            except Exception as exc:
+                import traceback
+                print(f"[sync-bank-tx] FAILED from={from_arg}: {exc}")
+                traceback.print_exc()
+                try:
+                    token = _get_lark_token()
+                    if token:
+                        _write_sync_log(token, {
+                            "Status": "error",
+                            "Payments Created": 0,
+                            "Message": f"[SePay] ❌ Sync lỗi: {str(exc)[:200]}",
+                        })
+                except Exception:
+                    pass
+
+        background_tasks.add_task(_run_sync_safe, sb, from_str)
+        return {
+            "status": "started",
+            "from": from_str,
+            "message": "🔄 SePay → Lark GD SePay sync started.",
+        }
 
     @router.post("/refresh-report-sheets")
     def refresh_report_sheets(background_tasks: BackgroundTasks):
