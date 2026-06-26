@@ -1,0 +1,30 @@
+name: Lark Base sync (hourly cron)
+
+# Đẩy giao dịch SePay + mPOS/Payoo từ Supabase sang Lark Base mỗi giờ.
+# Window=70 phút để cover edge (>60min, dedup tự lo idempotency).
+#
+# Lý do dùng GitHub Actions: Lark Automation `At scheduled time` min interval
+# là 1 ngày, không đủ. GitHub Actions cron tối thiểu 5 phút.
+
+on:
+  schedule:
+    - cron: '0 * * * *'    # mỗi giờ phút 0 (UTC)
+  workflow_dispatch:        # cho phép trigger tay từ GitHub UI
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync SePay → Lark "GD SePay"
+        run: |
+          curl -fsS -X POST \
+            "https://pf-revenue-api.onrender.com/api/v1/lark/sync-bank-transactions?window=70" \
+            --max-time 30 \
+            -w "\nHTTP %{http_code}\n"
+
+      - name: Sync mPOS/Payoo → Lark "GD mPOS/Payoo"
+        run: |
+          curl -fsS -X POST \
+            "https://pf-revenue-api.onrender.com/api/v1/lark/sync-gateway-transactions?window=70" \
+            --max-time 30 \
+            -w "\nHTTP %{http_code}\n"
