@@ -875,6 +875,81 @@ def register_lark_report_routes(app, sb_getter):
             "message": "🔄 SePay → Lark GD SePay sync started.",
         }
 
+    @router.post("/sync-gateway-transactions")
+    def sync_gateway_transactions_endpoint(
+        background_tasks: BackgroundTasks,
+        from_iso: Optional[str] = Query(None, alias="from"),
+        window_minutes: Optional[int] = Query(10, alias="window"),
+    ):
+        """Incremental sync gateway_transactions → Lark "GD mPOS/Payoo".
+
+        Sliding window: lấy `gateway_transactions.imported_at` > `from`. Mặc
+        định `now - window_minutes`. Lark Automation cron 1-5 phút gọi endpoint.
+        Dedup theo "Mã giao dịch" trên Lark → gọi lặp lại an toàn.
+        """
+        from datetime import timedelta
+
+        from lark_gateway_tx_sync import sync_gateway_transactions as _sync
+
+        sb = _sb()
+        if from_iso and from_iso.strip():
+            from_str = from_iso.strip()
+        else:
+            window = max(1, int(window_minutes or 10))
+            from_dt = datetime.now(timezone.utc) - timedelta(minutes=window)
+            from_str = from_dt.isoformat()
+
+        SYNC_LOGS_TABLE_ID = "tblfBBHRoTEPLey5"
+
+        def _write_sync_log(token, fields):
+            try:
+                url = (
+                    f"{LARK_DOMAIN}/open-apis/bitable/v1/apps/"
+                    f"{LARK_BASE_APP_TOKEN}/tables/{SYNC_LOGS_TABLE_ID}/records"
+                )
+                _curl_json("POST", url, [f"Authorization: Bearer {token}"], {"fields": fields})
+            except Exception as exc:
+                print(f"[sync-gateway-tx] log write fail: {exc}")
+
+        def _run_sync_safe(supabase_client, from_arg):
+            try:
+                result = _sync(supabase_client, from_arg)
+                print(f"[sync-gateway-tx] DONE from={from_arg}: {result}")
+                token = _get_lark_token()
+                if not token:
+                    return
+                msg = (
+                    f"✅ mPOS/Payoo sync: tạo mới {result.get('created', 0)} GD. "
+                    f"Bỏ qua {sum(result.get('skip_stats', {}).values())}."
+                )
+                _write_sync_log(token, {
+                    "Status": "success",
+                    "Payments Created": result.get("created", 0),
+                    "Skip Stats": json.dumps(result.get("skip_stats", {}), ensure_ascii=False),
+                    "Message": f"[mPOS/Payoo] {msg}",
+                })
+            except Exception as exc:
+                import traceback
+                print(f"[sync-gateway-tx] FAILED from={from_arg}: {exc}")
+                traceback.print_exc()
+                try:
+                    token = _get_lark_token()
+                    if token:
+                        _write_sync_log(token, {
+                            "Status": "error",
+                            "Payments Created": 0,
+                            "Message": f"[mPOS/Payoo] ❌ Sync lỗi: {str(exc)[:200]}",
+                        })
+                except Exception:
+                    pass
+
+        background_tasks.add_task(_run_sync_safe, sb, from_str)
+        return {
+            "status": "started",
+            "from": from_str,
+            "message": "🔄 mPOS/Payoo → Lark GD mPOS/Payoo sync started.",
+        }
+
     @router.post("/refresh-report-sheets")
     def refresh_report_sheets(background_tasks: BackgroundTasks):
         """Refresh BCTB + BC Team Kênh Lark Sheets with latest Payments data.
