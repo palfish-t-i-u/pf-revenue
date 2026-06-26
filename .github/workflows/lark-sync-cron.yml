@@ -3,8 +3,8 @@ name: Lark Base sync (hourly cron)
 # Đẩy giao dịch SePay + mPOS/Payoo từ Supabase sang Lark Base mỗi giờ.
 # Window=70 phút để cover edge (>60min, dedup tự lo idempotency).
 #
-# Lý do dùng GitHub Actions: Lark Automation `At scheduled time` min interval
-# là 1 ngày, không đủ. GitHub Actions cron tối thiểu 5 phút.
+# Render free/starter tier có thể sleep sau 15 phút idle → cần warmup +
+# timeout dài + retry để xử lý cold start (60-90s đầu tiên).
 
 on:
   schedule:
@@ -15,16 +15,26 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
+      - name: Warmup (đánh thức Render nếu cold)
+        run: |
+          # Gọi /health với retry để wake service. Không fail job nếu lỗi.
+          curl -sS --max-time 120 \
+            --retry 3 --retry-delay 15 --retry-connrefused \
+            -w "\nHTTP %{http_code}\n" \
+            "https://pf-revenue-api.onrender.com/health" || true
+
       - name: Sync SePay → Lark "GD SePay"
         run: |
           curl -fsS -X POST \
-            "https://pf-revenue-api.onrender.com/api/v1/lark/sync-bank-transactions?window=70" \
-            --max-time 30 \
-            -w "\nHTTP %{http_code}\n"
+            --max-time 90 \
+            --retry 2 --retry-delay 10 --retry-connrefused \
+            -w "\nHTTP %{http_code}\n" \
+            "https://pf-revenue-api.onrender.com/api/v1/lark/sync-bank-transactions?window=70"
 
       - name: Sync mPOS/Payoo → Lark "GD mPOS/Payoo"
         run: |
           curl -fsS -X POST \
-            "https://pf-revenue-api.onrender.com/api/v1/lark/sync-gateway-transactions?window=70" \
-            --max-time 30 \
-            -w "\nHTTP %{http_code}\n"
+            --max-time 90 \
+            --retry 2 --retry-delay 10 --retry-connrefused \
+            -w "\nHTTP %{http_code}\n" \
+            "https://pf-revenue-api.onrender.com/api/v1/lark/sync-gateway-transactions?window=70"
