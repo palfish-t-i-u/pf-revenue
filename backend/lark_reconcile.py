@@ -198,6 +198,34 @@ def reconcile(
     log(f"[reconcile] {len(matched_payment_ids)} payments already matched, "
         f"{sum(len(v) for v in payments_by_amount.values())} unmatched candidates")
 
+    # ── Debug: sample data from each table ───────────────────────
+    if payments_by_amount:
+        sample_amounts = list(payments_by_amount.keys())[:5]
+        log(f"[reconcile] DEBUG payment amount samples: {sample_amounts}")
+        for amt in sample_amounts[:2]:
+            for p in payments_by_amount[amt][:1]:
+                log(f"[reconcile] DEBUG payment: amount={amt} pay_date={p['pay_date']} "
+                    f"bank_date={p['bank_date']} phone={p['phone']} uid={p['uid']}")
+
+    sepay_skip_reasons = {"already_matched": 0, "already_linked": 0,
+                          "no_amount": 0, "no_candidates": 0, "no_date_match": 0}
+    for rec in sepay_raw[:3]:
+        f = rec["fields"]
+        log(f"[reconcile] DEBUG sepay sample: "
+            f"amount={f.get('Số tiền (VND)')} "
+            f"date={f.get('Thời gian giao dịch')} "
+            f"status={_text(f.get('Trạng thái đối soát'))} "
+            f"linked={bool(f.get('Payment khớp'))} "
+            f"content={_text(f.get('Nội dung CK'))[:50]}")
+
+    for rec in gateway_raw[:3]:
+        f = rec["fields"]
+        log(f"[reconcile] DEBUG gateway sample: "
+            f"amount={f.get('Số tiền khách trả (VND)')} "
+            f"date={f.get('Thời gian quẹt thẻ')} "
+            f"status={_text(f.get('Trạng thái đối soát'))} "
+            f"linked={bool(f.get('Payment khớp'))}")
+
     # ── 3. Match SePay ───────────────────────────────────────────
     sepay_updates = []
     newly_matched = set()
@@ -207,12 +235,15 @@ def reconcile(
         f = rec["fields"]
         status = _text(f.get("Trạng thái đối soát"))
         if status == "Đã khớp" or status == "Bỏ qua":
+            sepay_skip_reasons["already_matched"] += 1
             continue
         if f.get("Payment khớp"):
+            sepay_skip_reasons["already_linked"] += 1
             continue
 
         amount = f.get("Số tiền (VND)")
         if not amount:
+            sepay_skip_reasons["no_amount"] += 1
             continue
         amount_key = int(round(float(amount)))
         txn_date = _ts_to_date(f.get("Thời gian giao dịch"))
@@ -220,14 +251,21 @@ def reconcile(
         candidates = payments_by_amount.get(amount_key, [])
         candidates = [c for c in candidates if c["record_id"] not in newly_matched]
         if not candidates:
+            sepay_skip_reasons["no_candidates"] += 1
+            log(f"[reconcile] DEBUG sepay no candidate: amount_key={amount_key} txn_date={txn_date}")
             continue
 
         if txn_date:
+            pre_filter = len(candidates)
             candidates = [
                 c for c in candidates
                 if (c["bank_date"] and abs((c["bank_date"] - txn_date).days) <= 1)
                 or (c["pay_date"] and abs((c["pay_date"] - txn_date).days) <= 1)
             ]
+            if not candidates:
+                sepay_skip_reasons["no_date_match"] += 1
+                log(f"[reconcile] DEBUG sepay date mismatch: amount_key={amount_key} "
+                    f"txn_date={txn_date} had {pre_filter} amount candidates")
         if not candidates:
             continue
 
@@ -265,7 +303,8 @@ def reconcile(
             },
         })
 
-    log(f"[reconcile] SePay: {len(sepay_updates)} matches found")
+    log(f"[reconcile] SePay: {len(sepay_updates)} matches found, "
+        f"skip reasons: {sepay_skip_reasons}")
 
     # ── 4. Match mPOS/Payoo ──────────────────────────────────────
     gateway_updates = []
