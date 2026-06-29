@@ -16,9 +16,6 @@ LARK_DOMAIN = "https://open.larksuite.com"
 
 # Lark Base table IDs
 PAYMENTS_TABLE = "tbl4FJzV8YC21S9d"
-SALES_TABLE = "tbl2umPupa2LUKws"
-CHANNELS_TABLE = "tbl3aHNFWx08gPqm"
-PACKAGES_TABLE = "tbl6oFtSD0wW7Dqo"
 CUSTOMERS_TABLE = "tbl2RlAIpK0nQMlE"
 
 # so_doanh_thu.team → Lark Team SingleSelect option
@@ -190,27 +187,6 @@ def sync_payments(
     log("Fetching Lark lookups...")
     token = _get_token()
 
-    sales_recs = _fetch_all(token, app_token, SALES_TABLE)
-    sales_map = {}
-    for r in sales_recs:
-        n = _text(r["fields"].get("Họ tên"))
-        if n:
-            sales_map.setdefault(n, r["record_id"])
-
-    chan_recs = _fetch_all(token, app_token, CHANNELS_TABLE)
-    chan_map = {}
-    for r in chan_recs:
-        n = _text(r["fields"].get("Tên kênh"))
-        if n:
-            chan_map.setdefault(n, r["record_id"])
-
-    pkg_recs = _fetch_all(token, app_token, PACKAGES_TABLE)
-    pkg_map = {}
-    for r in pkg_recs:
-        n = _text(r["fields"].get("Tên gói"))
-        if n:
-            pkg_map.setdefault(n, r["record_id"])
-
     cust_recs = _fetch_all(token, app_token, CUSTOMERS_TABLE)
     cust_map = {}
     for r in cust_recs:
@@ -224,8 +200,7 @@ def sync_payments(
         pid = _text(r["fields"].get("Payment ID"))
         if pid:
             existing_payment_ids.add(pid)
-    log(f"  lookups: {len(sales_map)} sales, {len(chan_map)} chans, "
-        f"{len(pkg_map)} pkgs, {len(cust_map)} customers, "
+    log(f"  lookups: {len(cust_map)} customers, "
         f"{len(existing_payment_ids)} existing payments")
 
     # ── 3. Auto-create missing Customers ─────────────────────────
@@ -282,17 +257,8 @@ def sync_payments(
             continue
 
         sale_name = (r.get("sale_crm_name") or "").strip()
-        sale_id = sales_map.get(sale_name) if sale_name else None
-        if sale_name and not sale_id:
-            skip_stats["sale_missing"] += 1
-            continue
-
-        chan_id = chan_map.get(r["loai"].strip())
-        if not chan_id:
-            skip_stats["channel_missing"] += 1
-            continue
-
-        pkg_id = pkg_map.get((r.get("goi_hoc") or "").strip()) if r.get("goi_hoc") else None
+        chan_name = (r.get("loai") or "").strip()
+        pkg_name = (r.get("goi_hoc") or "").strip()
         team_raw = (r.get("team") or "").strip()
         team_lark = TEAM_MAP.get(team_raw, team_raw)
 
@@ -300,7 +266,6 @@ def sync_payments(
             "Payment ID": pid,
             "UID": uid,
             "Khách hàng": [cust_id],
-            "Kênh": [chan_id],
             "GMV VND": int(r.get("so_tien_vnd") or 0),
             "GMV RMB": float(r.get("gmv_rmb") or 0),
         }
@@ -309,10 +274,12 @@ def sync_payments(
             fields["Ngày thanh toán"] = int(dt.timestamp() * 1000)
         if r.get("ngay_tien_ve"):
             fields["Ngày ngân hàng"] = r["ngay_tien_ve"]
-        if sale_id:
-            fields["Sale"] = [sale_id]
-        if pkg_id:
-            fields["Gói"] = [pkg_id]
+        if sale_name:
+            fields["Sale"] = sale_name
+        if chan_name:
+            fields["Kênh"] = chan_name
+        if pkg_name:
+            fields["Gói"] = pkg_name
         if team_lark:
             fields["Team"] = team_lark
         if r.get("crm_order_id"):

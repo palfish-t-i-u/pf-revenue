@@ -2,6 +2,7 @@ name: Lark Base sync (hourly cron)
 
 # Đẩy giao dịch SePay + mPOS/Payoo từ Supabase sang Lark Base mỗi giờ.
 # Window=70 phút để cover edge (>60min, dedup tự lo idempotency).
+# Combined endpoint → 1 notification duy nhất (skip nếu 0 GD).
 #
 # Render free/starter tier có thể sleep sau 15 phút idle → cần warmup +
 # timeout dài + retry để xử lý cold start (60-90s đầu tiên).
@@ -23,18 +24,10 @@ jobs:
             -w "\nHTTP %{http_code}\n" \
             "https://pf-revenue-api.onrender.com/health" || true
 
-      - name: Sync SePay → Lark "GD SePay"
+      - name: Sync SePay + mPOS/Payoo → Lark (combined)
         run: |
           curl -fsS -X POST \
-            --max-time 90 \
+            --max-time 120 \
             --retry 2 --retry-delay 10 --retry-connrefused \
             -w "\nHTTP %{http_code}\n" \
-            "https://pf-revenue-api.onrender.com/api/v1/lark/sync-bank-transactions?window=70"
-
-      - name: Sync mPOS/Payoo → Lark "GD mPOS/Payoo"
-        run: |
-          curl -fsS -X POST \
-            --max-time 90 \
-            --retry 2 --retry-delay 10 --retry-connrefused \
-            -w "\nHTTP %{http_code}\n" \
-            "https://pf-revenue-api.onrender.com/api/v1/lark/sync-gateway-transactions?window=70"
+            "https://pf-revenue-api.onrender.com/api/v1/lark/sync-all?window=70"

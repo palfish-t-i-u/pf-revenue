@@ -537,8 +537,6 @@ def register_lark_report_routes(app, sb_getter):
     REPORT_BCTB_SHEET_ID = "f40d7f"
     REPORT_BC_CHAN_SHEET_ID = "SXJEk"
     PAYMENTS_TABLE_ID = "tbl4FJzV8YC21S9d"
-    SALES_TABLE_ID = "tbl2umPupa2LUKws"
-    CHANNELS_TABLE_ID = "tbl3aHNFWx08gPqm"
     CURRENT_MONTH_VIEW = "veweMuTm6b"
 
     def _extract_text(val):
@@ -605,32 +603,6 @@ def register_lark_report_routes(app, sb_getter):
         )
         print(f"[refresh-sheets] payments: {len(records)}")
 
-        # ── Sales lookup ────────────────────────────────────────
-        sale_items = _lark_search_records(
-            token, SALES_TABLE_ID,
-            {"field_names": ["Họ tên", "Team"]},
-        )
-        sale_map = {}
-        for s in sale_items:
-            f = s.get("fields", {})
-            sale_map[s["record_id"]] = {
-                "name": _extract_text(f.get("Họ tên", "")),
-                "team": str(f.get("Team", "")),
-            }
-
-        # ── Channels lookup ─────────────────────────────────────
-        chan_items = _lark_search_records(
-            token, CHANNELS_TABLE_ID,
-            {"field_names": ["Tên kênh", "Loại"]},
-        )
-        chan_map = {}
-        for c in chan_items:
-            f = c.get("fields", {})
-            name = _extract_text(f.get("Tên kênh", "")) or _extract_text(
-                f.get("Loại", "")
-            )
-            chan_map[c["record_id"]] = name
-
         # ── Aggregate ───────────────────────────────────────────
         sale_agg = defaultdict(lambda: defaultdict(lambda: {"gmv_vnd": 0, "gmv_rmb": 0, "count": 0}))
         chan_agg = defaultdict(lambda: defaultdict(lambda: {"count": 0, "gmv_rmb": 0, "don_dau": 0}))
@@ -647,16 +619,12 @@ def register_lark_report_routes(app, sb_getter):
             gmv_vnd = f.get("GMV VND", 0) if isinstance(f.get("GMV VND"), (int, float)) else 0
             gmv_rmb = f.get("GMV RMB", 0) if isinstance(f.get("GMV RMB"), (int, float)) else 0
 
-            sale_info = f.get("Sale", {})
-            sale_ids = sale_info.get("link_record_ids", []) if isinstance(sale_info, dict) else []
-            sale_name = sale_map.get(sale_ids[0], {}).get("name", "Unknown") if sale_ids else "Unknown"
+            sale_name = _extract_text(f.get("Sale", "")) or "Unknown"
             sale_agg[sale_name][d_str]["gmv_vnd"] += gmv_vnd
             sale_agg[sale_name][d_str]["gmv_rmb"] += gmv_rmb
             sale_agg[sale_name][d_str]["count"] += 1
 
-            chan_info = f.get("Kênh", {})
-            chan_ids = chan_info.get("link_record_ids", []) if isinstance(chan_info, dict) else []
-            channel = chan_map.get(chan_ids[0], "Unknown") if chan_ids else "N/A"
+            channel = _extract_text(f.get("Kênh", "")) or "N/A"
             chan_agg[channel][d_str]["count"] += 1
             chan_agg[channel][d_str]["gmv_rmb"] += gmv_rmb
             chan_agg[channel][d_str]["don_dau"] += 1
@@ -843,16 +811,16 @@ def register_lark_report_routes(app, sb_getter):
                 if not token:
                     return
                 # Reuse SYNC_LOGS_TABLE_ID — phân biệt qua "Message" tag prefix
-                msg = (
-                    f"✅ SePay sync: tạo mới {result.get('created', 0)} GD. "
-                    f"Bỏ qua {sum(result.get('skip_stats', {}).values())}."
-                )
-                _write_sync_log(token, {
-                    "Status": "success",
-                    "Payments Created": result.get("created", 0),
-                    "Skip Stats": json.dumps(result.get("skip_stats", {}), ensure_ascii=False),
-                    "Message": f"[SePay] {msg}",
-                })
+                created = result.get("created", 0)
+                skipped = sum(result.get("skip_stats", {}).values())
+                if created > 0 or skipped > 0:
+                    msg = f"✅ SePay sync: tạo mới {created} GD. Bỏ qua {skipped}."
+                    _write_sync_log(token, {
+                        "Status": "success",
+                        "Payments Created": created,
+                        "Skip Stats": json.dumps(result.get("skip_stats", {}), ensure_ascii=False),
+                        "Message": f"[SePay] {msg}",
+                    })
             except Exception as exc:
                 import traceback
                 print(f"[sync-bank-tx] FAILED from={from_arg}: {exc}")
@@ -918,16 +886,16 @@ def register_lark_report_routes(app, sb_getter):
                 token = _get_lark_token()
                 if not token:
                     return
-                msg = (
-                    f"✅ mPOS/Payoo sync: tạo mới {result.get('created', 0)} GD. "
-                    f"Bỏ qua {sum(result.get('skip_stats', {}).values())}."
-                )
-                _write_sync_log(token, {
-                    "Status": "success",
-                    "Payments Created": result.get("created", 0),
-                    "Skip Stats": json.dumps(result.get("skip_stats", {}), ensure_ascii=False),
-                    "Message": f"[mPOS/Payoo] {msg}",
-                })
+                created = result.get("created", 0)
+                skipped = sum(result.get("skip_stats", {}).values())
+                if created > 0 or skipped > 0:
+                    msg = f"✅ mPOS/Payoo sync: tạo mới {created} GD. Bỏ qua {skipped}."
+                    _write_sync_log(token, {
+                        "Status": "success",
+                        "Payments Created": created,
+                        "Skip Stats": json.dumps(result.get("skip_stats", {}), ensure_ascii=False),
+                        "Message": f"[mPOS/Payoo] {msg}",
+                    })
             except Exception as exc:
                 import traceback
                 print(f"[sync-gateway-tx] FAILED from={from_arg}: {exc}")
@@ -948,6 +916,98 @@ def register_lark_report_routes(app, sb_getter):
             "status": "started",
             "from": from_str,
             "message": "🔄 mPOS/Payoo → Lark GD mPOS/Payoo sync started.",
+        }
+
+    @router.post("/sync-all")
+    def sync_all_endpoint(
+        background_tasks: BackgroundTasks,
+        from_iso: Optional[str] = Query(None, alias="from"),
+        window_minutes: Optional[int] = Query(70, alias="window"),
+    ):
+        """Combined sync: SePay + mPOS/Payoo → Lark, single notification.
+
+        Replaces calling sync-bank-transactions + sync-gateway-transactions
+        separately. Writes ONE sync log record with combined results.
+        Skips notification entirely when 0 GD created across both sources.
+        """
+        from datetime import timedelta
+
+        from lark_bank_tx_sync import sync_bank_transactions as _sync_bank
+        from lark_gateway_tx_sync import sync_gateway_transactions as _sync_gw
+
+        sb = _sb()
+        if from_iso and from_iso.strip():
+            from_str = from_iso.strip()
+        else:
+            window = max(1, int(window_minutes or 70))
+            from_dt = datetime.now(timezone.utc) - timedelta(minutes=window)
+            from_str = from_dt.isoformat()
+
+        SYNC_LOGS_TABLE_ID = "tblfBBHRoTEPLey5"
+
+        def _run_combined(supabase_client, from_arg):
+            bank_result = {"created": 0, "skip_stats": {}}
+            gw_result = {"created": 0, "skip_stats": {}}
+            errors = []
+
+            try:
+                bank_result = _sync_bank(supabase_client, from_arg)
+                print(f"[sync-all] SePay done: {bank_result}")
+            except Exception as exc:
+                errors.append(f"SePay: {str(exc)[:100]}")
+                print(f"[sync-all] SePay FAILED: {exc}")
+
+            try:
+                gw_result = _sync_gw(supabase_client, from_arg)
+                print(f"[sync-all] mPOS/Payoo done: {gw_result}")
+            except Exception as exc:
+                errors.append(f"mPOS/Payoo: {str(exc)[:100]}")
+                print(f"[sync-all] mPOS/Payoo FAILED: {exc}")
+
+            bank_created = bank_result.get("created", 0)
+            gw_created = gw_result.get("created", 0)
+            total_created = bank_created + gw_created
+
+            if total_created == 0 and not errors:
+                print(f"[sync-all] 0 GD created, skip notification")
+                return
+
+            token = _get_lark_token()
+            if not token:
+                return
+
+            try:
+                url = (
+                    f"{LARK_DOMAIN}/open-apis/bitable/v1/apps/"
+                    f"{LARK_BASE_APP_TOKEN}/tables/{SYNC_LOGS_TABLE_ID}/records"
+                )
+                if errors:
+                    parts = [f"⚠️ Sync: SePay {bank_created} GD, mPOS/Payoo {gw_created} GD."]
+                    parts.append(f"Lỗi: {'; '.join(errors)}")
+                    msg = " ".join(parts)
+                    status = "error"
+                else:
+                    msg = f"✅ Sync: SePay {bank_created} GD, mPOS/Payoo {gw_created} GD."
+                    status = "success"
+
+                combined_skip = {
+                    **{f"sepay:{k}": v for k, v in bank_result.get("skip_stats", {}).items()},
+                    **{f"gateway:{k}": v for k, v in gw_result.get("skip_stats", {}).items()},
+                }
+                _curl_json("POST", url, [f"Authorization: Bearer {token}"], {"fields": {
+                    "Status": status,
+                    "Payments Created": total_created,
+                    "Skip Stats": json.dumps(combined_skip, ensure_ascii=False),
+                    "Message": msg,
+                }})
+            except Exception as exc:
+                print(f"[sync-all] log write fail: {exc}")
+
+        background_tasks.add_task(_run_combined, sb, from_str)
+        return {
+            "status": "started",
+            "from": from_str,
+            "message": "🔄 Combined sync (SePay + mPOS/Payoo) started.",
         }
 
     @router.post("/refresh-report-sheets")
