@@ -153,15 +153,27 @@ def sync_payments(
 
     log(f"Sync from {from_date}")
 
-    # ── 1. Read so_doanh_thu ─────────────────────────────────────
-    res = sb.table("so_doanh_thu").select(
+    # ── 1. Read so_doanh_thu (paginated — Supabase default limit=1000) ─
+    cols = (
         "id, pay_time, ngay_tien_ve, uid, ten_khach, sdt, "
         "sale_crm_name, team, loai, goi_hoc, so_tien_vnd, gmv_rmb, "
         "crm_order_id, note"
-    ).gt("ngay_tien_ve", from_date).lte(
-        "ngay_tien_ve", date.today().isoformat()
-    ).execute()
-    rows = res.data or []
+    )
+    rows = []
+    page_size = 1000
+    offset = 0
+    today_str = date.today().isoformat()
+    while True:
+        res = sb.table("so_doanh_thu").select(cols).gt(
+            "ngay_tien_ve", from_date
+        ).lte(
+            "ngay_tien_ve", today_str
+        ).range(offset, offset + page_size - 1).execute()
+        batch = res.data or []
+        rows.extend(batch)
+        if len(batch) < page_size:
+            break
+        offset += page_size
     log(f"  {len(rows)} rows from so_doanh_thu")
 
     valid = [
@@ -286,6 +298,10 @@ def sync_payments(
             fields["CRM Order ID"] = r["crm_order_id"]
         if r.get("note"):
             fields["Note"] = r["note"]
+        if r.get("sdt"):
+            fields["SĐT gốc"] = r["sdt"].strip()
+        if r.get("ten_khach"):
+            fields["Tên KH"] = r["ten_khach"].strip()
 
         payments_to_create.append(fields)
 

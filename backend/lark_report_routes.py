@@ -968,8 +968,22 @@ def register_lark_report_routes(app, sb_getter):
             gw_created = gw_result.get("created", 0)
             total_created = bank_created + gw_created
 
-            if total_created == 0 and not errors:
-                print(f"[sync-all] 0 GD created, skip notification")
+            # ── Auto-reconcile after sync ────────────────────────
+            recon_result = {"total_matched": 0}
+            try:
+                from lark_reconcile import reconcile as _reconcile
+                recon_result = _reconcile(log=print)
+            except Exception as exc:
+                errors.append(f"Reconcile: {str(exc)[:100]}")
+                print(f"[sync-all] Reconcile FAILED: {exc}")
+
+            bank_created = bank_result.get("created", 0)
+            gw_created = gw_result.get("created", 0)
+            total_created = bank_created + gw_created
+            total_matched = recon_result.get("total_matched", 0)
+
+            if total_created == 0 and total_matched == 0 and not errors:
+                print(f"[sync-all] 0 GD created, 0 matched, skip notification")
                 return
 
             token = _get_lark_token()
@@ -981,13 +995,21 @@ def register_lark_report_routes(app, sb_getter):
                     f"{LARK_DOMAIN}/open-apis/bitable/v1/apps/"
                     f"{LARK_BASE_APP_TOKEN}/tables/{SYNC_LOGS_TABLE_ID}/records"
                 )
+                parts = []
                 if errors:
-                    parts = [f"⚠️ Sync: SePay {bank_created} GD, mPOS/Payoo {gw_created} GD."]
+                    parts.append(f"⚠️ Sync: SePay {bank_created} GD, mPOS/Payoo {gw_created} GD.")
+                    if total_matched:
+                        parts.append(f"Đối soát: khớp {total_matched} GD.")
                     parts.append(f"Lỗi: {'; '.join(errors)}")
                     msg = " ".join(parts)
                     status = "error"
                 else:
-                    msg = f"✅ Sync: SePay {bank_created} GD, mPOS/Payoo {gw_created} GD."
+                    parts.append(f"✅ Sync: SePay {bank_created} GD, mPOS/Payoo {gw_created} GD.")
+                    if total_matched:
+                        parts.append(f"Đối soát: khớp {total_matched} GD "
+                                     f"(SePay {recon_result.get('sepay_matched', 0)}, "
+                                     f"mPOS {recon_result.get('gateway_matched', 0)}).")
+                    msg = " ".join(parts)
                     status = "success"
 
                 combined_skip = {
@@ -1008,6 +1030,145 @@ def register_lark_report_routes(app, sb_getter):
             "status": "started",
             "from": from_str,
             "message": "🔄 Combined sync (SePay + mPOS/Payoo) started.",
+        }
+
+    @router.post("/reconcile")
+    def reconcile_endpoint(background_tasks: BackgroundTasks):
+        """Auto-match GD SePay + GD mPOS/Payoo with Payments.
+
+        Runs reconciliation in background. Sets DuplexLink "Payment khớp"
+        and updates "Trạng thái đối soát" → "Đã khớp" on matched GD records.
+        """
+        from lark_reconcile import reconcile as _reconcile
+
+        SYNC_LOGS_TABLE_ID = "tblfBBHRoTEPLey5"
+
+        def _run_reconcile():
+            try:
+                result = _reconcile(log=print)
+                print(f"[reconcile] DONE: {result}")
+                total = result.get("total_matched", 0)
+                if total == 0:
+                    return
+                token = _get_lark_token()
+                if not token:
+                    return
+                msg = (
+                    f"✅ Đối soát: khớp {total} GD "
+                    f"(SePay {result.get('sepay_matched', 0)}, "
+                    f"mPOS {result.get('gateway_matched', 0)}). "
+                    f"Bỏ qua {result.get('skipped_ambiguous', 0)} GD mập mờ."
+                )
+                url = (
+                    f"{LARK_DOMAIN}/open-apis/bitable/v1/apps/"
+                    f"{LARK_BASE_APP_TOKEN}/tables/{SYNC_LOGS_TABLE_ID}/records"
+                )
+                _curl_json("POST", url, [f"Authorization: Bearer {token}"], {"fields": {
+                    "Status": "success",
+                    "Message": msg,
+                }})
+            except Exception as exc:
+                import traceback
+                print(f"[reconcile] FAILED: {exc}")
+                traceback.print_exc()
+
+        background_tasks.add_task(_run_reconcile)
+        return {
+            "status": "started",
+            "message": "🔄 Auto-reconciliation started.",
+        }
+
+    @router.post("/backfill-payment-phone")
+    def backfill_payment_phone(background_tasks: BackgroundTasks):
+        """One-time backfill: fill SĐT gốc + Tên KH on existing Payments.
+
+        Matches Lark Payment ID → so_doanh_thu.id, copies sdt + ten_khach.
+        """
+        from lark_payment_sync import (
+            PAYMENTS_TABLE,
+            _fetch_all as _lark_fetch_all,
+            _get_token as _lark_get_token,
+            _text as _lark_text,
+        )
+
+        def _run_backfill():
+            try:
+                sb = sb_getter()
+                token = _lark_get_token()
+                app_token = os.environ.get("LARK_BASE_APP_TOKEN", "")
+
+                pay_recs = _lark_fetch_all(token, app_token, PAYMENTS_TABLE)
+                print(f"[backfill] Loaded {len(pay_recs)} Payments from Lark")
+
+                needs_update = []
+                for r in pay_recs:
+                    f = r["fields"]
+                    pid = _lark_text(f.get("Payment ID"))
+                    has_phone = bool(_lark_text(f.get("SĐT gốc")))
+                    has_name = bool(_lark_text(f.get("Tên KH")))
+                    if pid and (not has_phone or not has_name):
+                        needs_update.append((r["record_id"], pid, has_phone, has_name))
+
+                print(f"[backfill] {len(needs_update)} Payments missing SĐT gốc or Tên KH")
+                if not needs_update:
+                    print("[backfill] Nothing to do")
+                    return
+
+                pids = [int(pid) for _, pid, _, _ in needs_update]
+                sdt_rows = []
+                for i in range(0, len(pids), 500):
+                    chunk = pids[i:i + 500]
+                    res = sb.table("so_doanh_thu").select(
+                        "id, sdt, ten_khach"
+                    ).in_("id", chunk).execute()
+                    sdt_rows.extend(res.data or [])
+
+                sdt_map = {str(r["id"]): r for r in sdt_rows}
+                print(f"[backfill] Found {len(sdt_map)} matching so_doanh_thu rows")
+
+                updates = []
+                for record_id, pid, has_phone, has_name in needs_update:
+                    row = sdt_map.get(pid)
+                    if not row:
+                        continue
+                    fields = {}
+                    if not has_phone and row.get("sdt"):
+                        fields["SĐT gốc"] = row["sdt"].strip()
+                    if not has_name and row.get("ten_khach"):
+                        fields["Tên KH"] = row["ten_khach"].strip()
+                    if fields:
+                        updates.append({"record_id": record_id, "fields": fields})
+
+                print(f"[backfill] Updating {len(updates)} records...")
+
+                import time
+                updated = 0
+                url = (
+                    f"{LARK_DOMAIN}/open-apis/bitable/v1/apps/{app_token}/tables/"
+                    f"{PAYMENTS_TABLE}/records/batch_update"
+                )
+                for i in range(0, len(updates), 100):
+                    chunk = updates[i:i + 100]
+                    data = _curl_json(
+                        "POST", url, [f"Authorization: Bearer {token}"],
+                        {"records": chunk},
+                    )
+                    if data.get("code") == 0:
+                        updated += len(data["data"].get("records", []))
+                    else:
+                        print(f"[backfill] batch {i} error: {data.get('msg')}")
+                    time.sleep(1)
+
+                print(f"[backfill] DONE: updated {updated}/{len(updates)}")
+            except Exception as exc:
+                import traceback
+                print(f"[backfill] FAILED: {exc}")
+                traceback.print_exc()
+
+        background_tasks.add_task(_run_backfill)
+        return {
+            "status": "started",
+            "message": "🔄 Backfill SĐT gốc + Tên KH started.",
         }
 
     @router.post("/refresh-report-sheets")

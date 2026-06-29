@@ -31,7 +31,7 @@ App `pf-revenue` (repo này) có endpoint `POST /api/v1/lark/sync-bank-transacti
 - [x] **Giao dịch đảo (mPOS)**: skip status "Đảo"
 - [x] **Vùng thu mPOS**: map "TK thanh toán" → HCM/HN theo `COLLECTOR_MAP` (palfish02=HCM, palfish3=HN)
 - [x] **Parse amount VN format**: port `_parse_amount()` — handle "9.080.000" / "9,080,000" / "8,215.50"
-- [ ] **Logic match Payments**: khung `// TODO: match logic` trong `_shared.js` — cần spec rule (amount exact / window date / fuzzy content)
+- [x] **Logic match Payments**: implemented server-side in `backend/lark_reconcile.py` — matches by amount + date ±1 day + phone tie-breaker. Runs automatically in `/sync-all` cron and standalone via `POST /api/v1/lark/reconcile`.
 - [ ] **Test sandbox base trước khi chạy prod**
 - [ ] **Quyền**: script chạy với quyền user click button. Kế toán cần có quyền edit 2 bảng GD + bảng Payments.
 - [ ] **Lark Base scripting API**: verify cú pháp `bitable.base.getTableByName`, `input.fileAsync`, `input.buttonsAsync` trên workspace thực tế
