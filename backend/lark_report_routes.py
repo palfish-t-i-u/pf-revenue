@@ -1114,7 +1114,7 @@ def register_lark_report_routes(app, sb_getter):
                     print("[backfill] Nothing to do")
                     return
 
-                pids = [int(pid) for _, pid, _, _ in needs_update]
+                pids = [pid for _, pid, _, _ in needs_update]
                 sdt_rows = []
                 for i in range(0, len(pids), 500):
                     chunk = pids[i:i + 500]
